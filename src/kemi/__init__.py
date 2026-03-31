@@ -1,1 +1,1 @@
-# kemi — coming soon
+# kemi — Persistent memory for AI agents
