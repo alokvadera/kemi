@@ -37,7 +37,11 @@ def transition(memory: MemoryObject, new_state: LifecycleState) -> MemoryObject:
     """Create a new MemoryObject with updated lifecycle state.
 
     Does not mutate the original. Returns a new instance.
+
+    Raises ValueError if the transition is not allowed.
     """
+    validate_transition(memory.lifecycle_state, new_state)
+
     return MemoryObject(
         memory_id=memory.memory_id,
         user_id=memory.user_id,
