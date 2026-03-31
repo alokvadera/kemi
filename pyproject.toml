@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kemi"
+version = "0.0.1"
+description = "Persistent memory for AI agents."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kemi"]
