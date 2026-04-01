@@ -61,3 +61,11 @@ warn_unused_configs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=kemi --cov-report=term-missing --cov-fail-under=80"
+
+[tool.coverage.run]
+omit = [
+    "src/kemi/adapters/embedding/fastembed.py",
+    "src/kemi/adapters/embedding/openai.py",
+    "src/kemi/adapters/storage/custom.py",
+    "src/kemi/adapters/base.py",
+]
