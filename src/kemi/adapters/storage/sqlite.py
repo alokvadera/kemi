@@ -21,9 +21,16 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def __init__(self, db_path: str = "kemi.db"):
         self._db_path = db_path
+        self._shared_conn = None
+        if db_path == ":memory:":
+            self._shared_conn = sqlite3.connect(":memory:")
+            self._shared_conn.execute("PRAGMA journal_mode=WAL")
+            self._shared_conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def _get_connection(self) -> sqlite3.Connection:
+        if self._shared_conn is not None:
+            return self._shared_conn
         conn = sqlite3.connect(self._db_path)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
