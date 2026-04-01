@@ -115,3 +115,86 @@ def test_get_recall_filter() -> None:
     assert LifecycleState.DECAYING in result
     assert LifecycleState.ARCHIVED not in result
     assert LifecycleState.DELETED not in result
+
+
+def test_evaluate_lifecycle_deleted_state() -> None:
+    mem = MemoryObject(
+        memory_id="test",
+        user_id="user",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.utcnow(),
+        last_accessed_at=datetime.utcnow(),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.DELETED,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    result = lifecycle.evaluate_lifecycle(mem)
+    assert result == LifecycleState.DELETED
+
+
+def test_evaluate_lifecycle_archived_state() -> None:
+    mem = MemoryObject(
+        memory_id="test",
+        user_id="user",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.utcnow(),
+        last_accessed_at=datetime.utcnow(),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ARCHIVED,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    result = lifecycle.evaluate_lifecycle(mem)
+    assert result == LifecycleState.ARCHIVED
+
+
+def test_evaluate_lifecycle_future_access() -> None:
+    from datetime import timedelta
+
+    future = datetime.utcnow() + timedelta(hours=1)
+    mem = MemoryObject(
+        memory_id="test",
+        user_id="user",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.utcnow(),
+        last_accessed_at=future,
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    result = lifecycle.evaluate_lifecycle(mem)
+    assert result == LifecycleState.ACTIVE
+
+
+def test_transition_decaying_to_active() -> None:
+    mem = MemoryObject(
+        memory_id="test",
+        user_id="user",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.utcnow(),
+        last_accessed_at=datetime.utcnow(),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.DECAYING,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    result = lifecycle.transition(mem, LifecycleState.ACTIVE)
+    assert result.lifecycle_state == LifecycleState.ACTIVE

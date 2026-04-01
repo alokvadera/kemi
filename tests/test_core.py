@@ -58,3 +58,74 @@ def test_forget_by_user(mock_memory) -> None:
     mock_memory.remember("user123", "I live in Mumbai")
     result = mock_memory.forget("user123")
     assert result == 2
+
+
+def test_upgrade(mock_memory) -> None:
+    mock_memory.upgrade()
+
+
+def test_migrate(mock_memory) -> None:
+    from kemi.adapters.embedding.custom import CustomEmbedAdapter
+
+    mock_memory.remember("user123", "I am vegetarian")
+    mock_memory.remember("user123", "I live in Mumbai")
+
+    new_adapter = CustomEmbedAdapter(embed_fn=lambda texts: [[0.1] * 32 for _ in texts], dim=32)
+
+    result = mock_memory.migrate("user123", new_adapter)
+    assert result == 2
+
+
+def test_remember_with_sanitize_input(mock_memory) -> None:
+    result = mock_memory.remember("user123", "normal content", sanitize_input=True)
+    assert isinstance(result, str)
+
+
+def test_recall_with_lifecycle_filter(mock_memory) -> None:
+    mock_memory.remember("user123", "I am vegetarian")
+    from kemi.models import LifecycleState
+
+    result = mock_memory.recall("user123", "food", lifecycle_filter=[LifecycleState.ACTIVE])
+    assert isinstance(result, list)
+
+
+def test_recall_updates_lifecycle(mock_memory) -> None:
+    mock_memory.remember("user123", "I am vegetarian")
+    mock_memory.recall("user123", "food")
+    from kemi.models import LifecycleState
+
+    all_mem = mock_memory._store.get_all_by_user(
+        "user123", lifecycle_filter=[LifecycleState.ACTIVE, LifecycleState.DECAYING]
+    )
+    assert len(all_mem) > 0
+
+
+def test_context_block_custom_prefix(mock_memory) -> None:
+    mock_memory.remember("user123", "I am vegetarian")
+    result = mock_memory.context_block("user123", "food", prefix="Custom:")
+    assert result.startswith("Custom:")
+
+
+def test_remember_with_metadata(mock_memory) -> None:
+    result = mock_memory.remember("user123", "I am vegetarian", metadata={"source": "form"})
+    assert isinstance(result, str)
+
+
+def test_remember_with_source(mock_memory) -> None:
+    from kemi.models import MemorySource
+
+    result = mock_memory.remember("user123", "I am vegetarian", source=MemorySource.AGENT_INFERRED)
+    assert isinstance(result, str)
+
+
+def test_remember_with_importance(mock_memory) -> None:
+    result = mock_memory.remember("user123", "I am vegetarian", importance=0.9)
+    assert isinstance(result, str)
+
+
+def test_migrate_empty_user(mock_memory) -> None:
+    from kemi.adapters.embedding.custom import CustomEmbedAdapter
+
+    new_adapter = CustomEmbedAdapter(embed_fn=lambda texts: [[0.1] * 32 for _ in texts], dim=32)
+    result = mock_memory.migrate("nonexistent_user", new_adapter)
+    assert result == 0

@@ -271,3 +271,77 @@ def test_resolve_duplicate_no_mutation() -> None:
 
     assert existing.content == original_existing_content
     assert new_mem.content == original_new_content
+
+
+def test_find_duplicates_with_none_embedding() -> None:
+    new_mem = MemoryObject(
+        memory_id="new",
+        user_id="user",
+        content="I am vegetarian",
+        embedding=[1.0] * 64,
+        score=0.0,
+        created_at=None,
+        last_accessed_at=None,
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=64,
+    )
+
+    existing = [
+        MemoryObject(
+            memory_id="old",
+            user_id="user",
+            content="I also am vegetarian",
+            embedding=None,
+            score=0.0,
+            created_at=None,
+            last_accessed_at=None,
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+    ]
+
+    result = dedup.find_duplicates(new_mem, existing, threshold=0.85)
+    assert len(result) == 0
+
+
+def test_find_conflicts_with_none_embedding() -> None:
+    new_mem = MemoryObject(
+        memory_id="new",
+        user_id="user",
+        content="I like running",
+        embedding=[0.75] * 64,
+        score=0.0,
+        created_at=None,
+        last_accessed_at=None,
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=64,
+    )
+
+    existing = [
+        MemoryObject(
+            memory_id="old",
+            user_id="user",
+            content="I hate running",
+            embedding=None,
+            score=0.0,
+            created_at=None,
+            last_accessed_at=None,
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+    ]
+
+    result = dedup.find_conflicts(new_mem, existing, conflict_threshold=0.65, dedup_threshold=0.85)
+    assert len(result) == 0
