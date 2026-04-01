@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject
+from kemi.models import LifecycleState, MemoryObject, MemorySource
 from kemi import scoring
 
 
@@ -38,7 +38,7 @@ class JSONStorageAdapter(StorageAdapter):
             score=0.0,
             created_at=datetime.fromisoformat(data["created_at"]),
             last_accessed_at=datetime.fromisoformat(data["last_accessed_at"]),
-            source=LifecycleState(data["source"]),
+            source=MemorySource(data["source"]),
             importance=data["importance"],
             lifecycle_state=LifecycleState(data["lifecycle_state"]),
             metadata=data.get("metadata", {}),

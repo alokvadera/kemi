@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject
+from kemi.models import LifecycleState, MemoryObject, MemorySource
 from kemi import scoring
 
 
@@ -78,7 +78,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             score=0.0,
             created_at=datetime.fromisoformat(row["created_at"]),
             last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]),
-            source=LifecycleState(row["source"]),
+            source=MemorySource(row["source"]),
             importance=row["importance"],
             lifecycle_state=LifecycleState(row["lifecycle_state"]),
             metadata=json.loads(row["metadata"]),
