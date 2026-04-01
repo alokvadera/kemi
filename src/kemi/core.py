@@ -56,9 +56,9 @@ class Memory:
         importance: float = 0.5,
         source: MemorySource = MemorySource.USER_STATED,
         metadata: Optional[Dict[str, Any]] = None,
-        sanitize: bool = False,
+        sanitize_input: bool = False,
     ) -> str:
-        if sanitize:
+        if sanitize_input:
             content = sanitize.sanitize(content, strict=self._config.sanitize)
 
         embedding = self._embed.embed_single(content)
