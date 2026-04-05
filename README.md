@@ -111,6 +111,13 @@ kemi sits between your agent and your storage. It handles:
 | Embedding | fastembed (local) | OpenAI, custom |
 | Storage | SQLite | JSON, custom |
 
+## Documentation
+
+- [Quickstart](docs/quickstart.md) — get running in 5 minutes
+- [Recipes](docs/recipes.md) — complete working examples
+- [Configuration](docs/configuration.md) — tuning kemi for your use case
+- [Adapters](docs/adapters.md) — embeddings, storage, and custom implementations
+
 ## License
 
 MIT — free forever, no exceptions.
