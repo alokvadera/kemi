@@ -71,7 +71,7 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def _row_to_memory(self, row) -> MemoryObject:
         embedding = None
-        if row["embedding"]:
+        if row["embedding"] is not None:
             num_floats = len(row["embedding"]) // 4
             embedding = list(struct.unpack(f"{num_floats}f", row["embedding"]))
 
@@ -92,7 +92,7 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def _memory_to_row(self, memory: MemoryObject) -> dict:
         embedding_blob = None
-        if memory.embedding:
+        if memory.embedding is not None:
             embedding_blob = struct.pack(f"{len(memory.embedding)}f", *memory.embedding)
 
         return {
@@ -150,7 +150,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         memories = []
         for row in rows:
             memory = self._row_to_memory(row)
-            if memory.embedding:
+            if memory.embedding is not None:
                 similarity = scoring.cosine_similarity(memory.embedding, query_embedding)
                 memory.score = (similarity + 1.0) / 2.0
                 memories.append(memory)

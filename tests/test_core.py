@@ -1,3 +1,4 @@
+import pytest
 
 
 def test_remember_returns_string_id(mock_memory) -> None:
@@ -128,3 +129,37 @@ def test_migrate_empty_user(mock_memory) -> None:
     new_adapter = CustomEmbedAdapter(embed_fn=lambda texts: [[0.1] * 32 for _ in texts], dim=32)
     result = mock_memory.migrate("nonexistent_user", new_adapter)
     assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_aremember_returns_string_id(mock_memory) -> None:
+    result = await mock_memory.aremember("user123", "I am vegetarian")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+@pytest.mark.asyncio
+async def test_arecall_returns_list(mock_memory) -> None:
+    await mock_memory.aremember("user123", "I am vegetarian")
+    result = await mock_memory.arecall("user123", "food preferences")
+    assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_aforget_by_id(mock_memory) -> None:
+    mem_id = await mock_memory.aremember("user123", "I am vegetarian")
+    result = await mock_memory.aforget("user123", mem_id)
+    assert result == 1
+
+    result = await mock_memory.aforget("user123", mem_id)
+    assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_acontext_block_format(mock_memory) -> None:
+    await mock_memory.aremember("user123", "I am vegetarian")
+    await mock_memory.aremember("user123", "I live in Mumbai")
+    result = await mock_memory.acontext_block("user123", "user preferences")
+    assert result.startswith("Relevant context from memory:")
+    assert "- I am vegetarian" in result
+    assert "- I live in Mumbai" in result

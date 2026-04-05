@@ -81,7 +81,7 @@ class JSONStorageAdapter(StorageAdapter):
                 continue
 
             memory = self._row_to_memory(mem_data)
-            if memory.embedding:
+            if memory.embedding is not None:
                 similarity = scoring.cosine_similarity(memory.embedding, query_embedding)
                 memory.score = (similarity + 1.0) / 2.0
                 memories.append(memory)

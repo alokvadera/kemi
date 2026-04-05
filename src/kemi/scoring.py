@@ -4,13 +4,13 @@ from typing import Callable, Optional
 from kemi.models import MemoryObject
 
 
-def cosine_similarity(a: list[float], b: list[float]) -> float:
+def cosine_similarity(a: Optional[list[float]], b: Optional[list[float]]) -> float:
     """Compute cosine similarity between two vectors.
 
-    Returns 0.0 if either vector is all zeros to avoid division by zero.
+    Returns 0.0 if either vector is None or empty to avoid division by zero.
     Never returns NaN.
     """
-    if not a or not b:
+    if a is None or b is None or not a or not b:
         return 0.0
 
     dot_product = 0.0
@@ -57,7 +57,7 @@ def score_memory(memory: MemoryObject, query_embedding: list[float]) -> float:
     If memory.embedding is None or query_embedding is empty, cosine contribution is 0.0.
     """
     cosine_score = 0.0
-    if memory.embedding and query_embedding:
+    if memory.embedding is not None and query_embedding is not None:
         similarity = cosine_similarity(memory.embedding, query_embedding)
         cosine_score = (similarity + 1.0) / 2.0
 

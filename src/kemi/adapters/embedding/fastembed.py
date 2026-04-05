@@ -32,7 +32,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
         if not texts:
             return []
         model = self._get_model()
-        return list(model.embed(texts))
+        return [emb.tolist() for emb in model.embed(texts)]
 
     def embed_single(self, text: str) -> list[float]:
         return self.embed([text])[0]

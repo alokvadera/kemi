@@ -195,6 +195,63 @@ class Memory:
 
         return "\n".join(lines)
 
+    async def aremember(
+        self,
+        user_id: str,
+        content: str,
+        importance: float = 0.5,
+        source: MemorySource = MemorySource.USER_STATED,
+        metadata: Optional[dict[str, Any]] = None,
+        sanitize_input: bool = False,
+    ) -> str:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.remember(user_id, content, importance, source, metadata, sanitize_input),
+        )
+
+    async def arecall(
+        self,
+        user_id: str,
+        query: str,
+        top_k: int = 5,
+        max_tokens: Optional[int] = None,
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.recall(user_id, query, top_k, max_tokens, lifecycle_filter)
+        )
+
+    async def aforget(
+        self,
+        user_id: str,
+        memory_id: Optional[str] = None,
+    ) -> int:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: self.forget(user_id, memory_id))
+
+    async def acontext_block(
+        self,
+        user_id: str,
+        query: str,
+        top_k: int = 5,
+        max_tokens: int = 1500,
+        prefix: str = "Relevant context from memory:",
+    ) -> str:
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.context_block(user_id, query, top_k, max_tokens, prefix)
+        )
+
     def migrate(
         self,
         user_id: str,

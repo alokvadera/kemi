@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kemi"
-version = "0.1.0"
+version = "0.1.6"
 description = "Persistent memory for AI agents. Three methods. Zero infra."
 readme = "README.md"
 license = "MIT"
@@ -28,6 +28,7 @@ local = ["fastembed>=0.2.0"]
 openai = ["openai>=1.0.0"]
 dev = [
     "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
