@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from datetime import datetime
 from typing import Any, Optional
@@ -39,7 +40,9 @@ class Memory:
         if store is None:
             from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 
-            self._store: StorageAdapter = SQLiteStorageAdapter(db_path="kemi.db")
+            default_db_path = os.path.join(os.path.expanduser("~"), ".kemi", "memories.db")
+            os.makedirs(os.path.dirname(default_db_path), exist_ok=True)
+            self._store: StorageAdapter = SQLiteStorageAdapter(db_path=default_db_path)
         else:
             self._store = store
 
@@ -57,6 +60,15 @@ class Memory:
         metadata: Optional[dict[str, Any]] = None,
         sanitize_input: bool = False,
     ) -> str:
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        if not content or not content.strip():
+            raise ValueError("content cannot be empty — there is nothing to remember")
+        if not isinstance(importance, (int, float)):
+            raise TypeError(
+                f"importance must be a number between 0.0 and 1.0, got {type(importance).__name__}"
+            )
+
         if sanitize_input:
             content = sanitize.sanitize(content, strict=self._config.sanitize)
 
@@ -123,6 +135,13 @@ class Memory:
         max_tokens: Optional[int] = None,
         lifecycle_filter: Optional[list[LifecycleState]] = None,
     ) -> list[MemoryObject]:
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        if not query or not query.strip():
+            raise ValueError("query cannot be empty — what should kemi search for?")
+        if top_k < 1:
+            raise ValueError(f"top_k must be at least 1, got {top_k}")
+
         query_embedding = self._embed.embed_single(query)
 
         if lifecycle_filter is None:
@@ -134,6 +153,16 @@ class Memory:
             top_k=top_k * 3,
             lifecycle_filter=lifecycle_filter,
         )
+
+        current_dim = self._embed.dimension()
+        if search_results:
+            stored_dim = search_results[0].embedding_dim
+            if stored_dim is not None and stored_dim != current_dim:
+                raise ValueError(
+                    f"Embedding dimension mismatch: stored memories use {stored_dim} dimensions "
+                    f"but current adapter produces {current_dim} dimensions. "
+                    f"Run memory.migrate(user_id, new_adapter) to re-embed your memories."
+                )
 
         ranked = scoring.rank_memories(search_results, query_embedding)
 
@@ -164,6 +193,9 @@ class Memory:
         user_id: str,
         memory_id: Optional[str] = None,
     ) -> int:
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+
         if memory_id is not None:
             deleted = self._store.delete_by_id(memory_id)
             return 1 if deleted else 0
@@ -258,6 +290,11 @@ class Memory:
         new_embed_fn: EmbeddingAdapter,
         batch_size: int = 100,
     ) -> int:
+        if not user_id or not user_id.strip():
+            raise ValueError("user_id cannot be empty")
+        if batch_size < 1:
+            raise ValueError(f"batch_size must be at least 1, got {batch_size}")
+
         memories = self._store.get_all_by_user(
             user_id,
             lifecycle_filter=[LifecycleState.ACTIVE, LifecycleState.DECAYING],

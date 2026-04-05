@@ -163,3 +163,28 @@ async def test_acontext_block_format(mock_memory) -> None:
     assert result.startswith("Relevant context from memory:")
     assert "- I am vegetarian" in result
     assert "- I live in Mumbai" in result
+
+
+def test_remember_empty_content(mock_memory) -> None:
+    with pytest.raises(ValueError, match="content cannot be empty"):
+        mock_memory.remember("user123", "")
+
+
+def test_remember_empty_user_id(mock_memory) -> None:
+    with pytest.raises(ValueError, match="user_id cannot be empty"):
+        mock_memory.remember("", "I am vegetarian")
+
+
+def test_recall_empty_query(mock_memory) -> None:
+    with pytest.raises(ValueError, match="query cannot be empty"):
+        mock_memory.recall("user123", "")
+
+
+def test_recall_top_k_zero(mock_memory) -> None:
+    with pytest.raises(ValueError, match="top_k must be at least 1"):
+        mock_memory.recall("user123", "test", top_k=0)
+
+
+def test_forget_empty_user_id(mock_memory) -> None:
+    with pytest.raises(ValueError, match="user_id cannot be empty"):
+        mock_memory.forget("")
