@@ -85,6 +85,6 @@ Or use a different storage backend entirely:
 from kemi.adapters.storage.json import JSONStorageAdapter
 
 memory = Memory(
-    store=JSONStorageAdapter(file_path="/data/memories.json")
+    store=JSONStorageAdapter(path="/data/memories.json")
 )
 ```

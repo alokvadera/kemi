@@ -141,7 +141,7 @@ from kemi import Memory
 from kemi.adapters.storage.json import JSONStorageAdapter
 
 memory = Memory(
-    store=JSONStorageAdapter(file_path="memories.json")
+    store=JSONStorageAdapter(path="memories.json")
 )
 ```
 
@@ -154,13 +154,14 @@ from kemi import Memory
 from kemi.adapters.storage.custom import CustomStorageAdapter
 
 storage = CustomStorageAdapter(
-    get=lambda user_id, query, top_k: [],  # recall implementation
-    add=lambda memory: memory.memory_id,   # remember implementation
-    delete=lambda user_id, memory_id: 0,  # forget implementation
-    get_all=lambda user_id, lifecycle_filter: [],  # get_all implementation
-    update=lambda memory: None,            # update implementation
-    get_one=lambda memory_id: None,        # get implementation
-    count=lambda user_id: 0,               # count implementation
+    store=lambda memory: None,                    # store implementation
+    search=lambda user_id, query_embedding, top_k, lifecycle_filter: [],  # search implementation
+    get=lambda memory_id: None,                    # get implementation
+    update=lambda memory: None,                   # update implementation
+    delete_by_id=lambda memory_id: False,        # delete_by_id implementation
+    delete_by_user=lambda user_id: 0,            # delete_by_user implementation
+    get_all_by_user=lambda user_id, lifecycle_filter: [],  # get_all_by_user implementation
+    count=lambda user_id: 0,                     # count implementation
     upgrade_schema=lambda from_version, to_version: None,
 )
 
@@ -175,39 +176,43 @@ from kemi.models import MemoryObject, LifecycleState
 from typing import Optional
 
 class MyStorageAdapter(StorageAdapter):
-    def get(
+    def store(self, memory: MemoryObject) -> None:
+        # Your implementation
+        pass
+
+    def search(
         self,
         user_id: str,
-        query: str,
-        top_k: int = 5,
+        query_embedding: list[float],
+        top_k: int = 10,
         lifecycle_filter: Optional[list[LifecycleState]] = None,
     ) -> list[MemoryObject]:
         # Your implementation
         return []
 
-    def add(self, memory: MemoryObject) -> str:
+    def get(self, memory_id: str) -> Optional[MemoryObject]:
         # Your implementation
-        return memory.memory_id
-
-    def delete(self, user_id: str, memory_id: Optional[str] = None) -> int:
-        # Your implementation
-        return 0
-
-    def get_all(
-        self,
-        user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
-    ) -> list[MemoryObject]:
-        # Your implementation
-        return []
+        return None
 
     def update(self, memory: MemoryObject) -> None:
         # Your implementation
         pass
 
-    def get_one(self, memory_id: str) -> Optional[MemoryObject]:
+    def delete_by_id(self, memory_id: str) -> bool:
         # Your implementation
-        return None
+        return False
+
+    def delete_by_user(self, user_id: str) -> int:
+        # Your implementation
+        return 0
+
+    def get_all_by_user(
+        self,
+        user_id: str,
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
+        # Your implementation
+        return []
 
     def count(self, user_id: str) -> int:
         # Your implementation
@@ -240,6 +245,6 @@ from kemi import Memory
 from kemi.adapters.storage.json import JSONStorageAdapter
 
 memory = Memory(
-    store=JSONStorageAdapter(file_path="debug_memories.json")
+    store=JSONStorageAdapter(path="debug_memories.json")
 )
 ```
