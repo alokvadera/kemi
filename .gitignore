@@ -3,4 +3,5 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .venv/
-venv/
+venv/kemi.db
+*.db
