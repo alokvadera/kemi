@@ -1,11 +1,11 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Optional
 
+from kemi import scoring
 from kemi.adapters.base import StorageAdapter
 from kemi.models import LifecycleState, MemoryObject, MemorySource
-from kemi import scoring
 
 
 class JSONStorageAdapter(StorageAdapter):
@@ -21,7 +21,7 @@ class JSONStorageAdapter(StorageAdapter):
 
     def _load(self) -> dict:
         if self._path.exists():
-            with open(self._path, "r") as f:
+            with open(self._path) as f:
                 return json.load(f)
         return {"memories": {}, "schema_version": 1}
 
@@ -64,10 +64,10 @@ class JSONStorageAdapter(StorageAdapter):
     def search(
         self,
         user_id: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
 
@@ -82,9 +82,7 @@ class JSONStorageAdapter(StorageAdapter):
 
             memory = self._row_to_memory(mem_data)
             if memory.embedding:
-                similarity = scoring.cosine_similarity(
-                    memory.embedding, query_embedding
-                )
+                similarity = scoring.cosine_similarity(memory.embedding, query_embedding)
                 memory.score = (similarity + 1.0) / 2.0
                 memories.append(memory)
 
@@ -101,9 +99,7 @@ class JSONStorageAdapter(StorageAdapter):
         self.store(memory)
 
     def delete_by_user(self, user_id: str) -> int:
-        to_delete = [
-            mid for mid, m in self._data["memories"].items() if m["user_id"] == user_id
-        ]
+        to_delete = [mid for mid, m in self._data["memories"].items() if m["user_id"] == user_id]
         for mid in to_delete:
             del self._data["memories"][mid]
         if to_delete:
@@ -120,8 +116,8 @@ class JSONStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
 
@@ -134,9 +130,7 @@ class JSONStorageAdapter(StorageAdapter):
         ]
 
     def count(self, user_id: str) -> int:
-        return sum(
-            1 for m in self._data["memories"].values() if m["user_id"] == user_id
-        )
+        return sum(1 for m in self._data["memories"].values() if m["user_id"] == user_id)
 
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         self._data["schema_version"] = to_version

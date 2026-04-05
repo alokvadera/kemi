@@ -1,4 +1,4 @@
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Optional
 
 from kemi.adapters.base import StorageAdapter
 from kemi.models import LifecycleState, MemoryObject
@@ -13,12 +13,12 @@ class CustomStorageAdapter(StorageAdapter):
     def __init__(
         self,
         store_fn: Optional[Callable[[MemoryObject], None]] = None,
-        search_fn: Optional[Callable[..., List[MemoryObject]]] = None,
+        search_fn: Optional[Callable[..., list[MemoryObject]]] = None,
         get_fn: Optional[Callable[[str], Optional[MemoryObject]]] = None,
         update_fn: Optional[Callable[[MemoryObject], None]] = None,
         delete_by_user_fn: Optional[Callable[[str], int]] = None,
         delete_by_id_fn: Optional[Callable[[str], bool]] = None,
-        get_all_by_user_fn: Optional[Callable[..., List[MemoryObject]]] = None,
+        get_all_by_user_fn: Optional[Callable[..., list[MemoryObject]]] = None,
         count_fn: Optional[Callable[[str], int]] = None,
         upgrade_schema_fn: Optional[Callable[[int, int], None]] = None,
     ):
@@ -38,8 +38,7 @@ class CustomStorageAdapter(StorageAdapter):
         fn = self._fns.get(name)
         if fn is None:
             raise NotImplementedError(
-                f"CustomStorageAdapter: method '{name}' not provided. "
-                f"Pass it to __init__."
+                f"CustomStorageAdapter: method '{name}' not provided. Pass it to __init__."
             )
         return fn
 
@@ -49,10 +48,10 @@ class CustomStorageAdapter(StorageAdapter):
     def search(
         self,
         user_id: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         return self._get_fn("search")(user_id, query_embedding, top_k, lifecycle_filter)
 
     def get(self, memory_id: str) -> Optional[MemoryObject]:
@@ -70,8 +69,8 @@ class CustomStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         return self._get_fn("get_all_by_user")(user_id, lifecycle_filter)
 
     def count(self, user_id: str) -> int:

@@ -1,27 +1,27 @@
 import hashlib
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import pytest
 
 from kemi import Memory
 from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.models import LifecycleState, MemoryObject
 
 
 class MockEmbeddingAdapter(EmbeddingAdapter):
     def __init__(self) -> None:
         self._dim = 64
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._deterministic_vector(t) for t in texts]
 
-    def embed_single(self, text: str) -> List[float]:
+    def embed_single(self, text: str) -> list[float]:
         return self._deterministic_vector(text)
 
     def dimension(self) -> int:
         return self._dim
 
-    def _deterministic_vector(self, text: str) -> List[float]:
+    def _deterministic_vector(self, text: str) -> list[float]:
         raw = hashlib.sha256(text.encode()).digest()
         expanded = raw * (self._dim // len(raw) + 1)
         vector = [b / 255.0 for b in expanded[: self._dim]]
@@ -30,7 +30,7 @@ class MockEmbeddingAdapter(EmbeddingAdapter):
 
 class MockStorageAdapter(StorageAdapter):
     def __init__(self) -> None:
-        self._store: Dict[str, MemoryObject] = {}
+        self._store: dict[str, MemoryObject] = {}
 
     def store(self, memory: MemoryObject) -> None:
         self._store[memory.memory_id] = memory
@@ -38,10 +38,10 @@ class MockStorageAdapter(StorageAdapter):
     def search(
         self,
         user_id: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         from kemi.scoring import cosine_similarity
 
         if lifecycle_filter is None:
@@ -81,8 +81,8 @@ class MockStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         result = [m for m in self._store.values() if m.user_id == user_id]
         if lifecycle_filter is not None:
             result = [m for m in result if m.lifecycle_state in lifecycle_filter]
@@ -96,15 +96,15 @@ class MockStorageAdapter(StorageAdapter):
 
 
 @pytest.fixture
-def MockEmbedding() -> type:
+def mock_embedding() -> type:
     return MockEmbeddingAdapter
 
 
 @pytest.fixture
-def MockStorage() -> type:
+def mock_storage() -> type:
     return MockStorageAdapter
 
 
 @pytest.fixture
-def mock_memory(MockEmbedding: type, MockStorage: type) -> Memory:
-    return Memory(embed=MockEmbedding(), store=MockStorage())
+def mock_memory(mock_embedding: type, mock_storage: type) -> Memory:
+    return Memory(embed=mock_embedding(), store=mock_storage())

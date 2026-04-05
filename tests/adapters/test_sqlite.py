@@ -1,6 +1,6 @@
-import pytest
-
 from datetime import datetime
+
+import pytest
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 from kemi.models import LifecycleState, MemoryObject, MemorySource

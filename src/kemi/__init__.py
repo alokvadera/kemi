@@ -1,5 +1,5 @@
 from kemi.core import Memory
-from kemi.models import MemoryConfig, MemoryObject, MemorySource, LifecycleState
+from kemi.models import LifecycleState, MemoryConfig, MemoryObject, MemorySource
 
 __all__ = [
     "Memory",

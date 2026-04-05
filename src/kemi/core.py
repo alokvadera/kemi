@@ -1,17 +1,16 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
-from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
 from kemi import dedup, lifecycle, sanitize, scoring
+from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
 from kemi.models import (
+    LifecycleState,
     MemoryConfig,
     MemoryObject,
     MemorySource,
-    LifecycleState,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,7 @@ class Memory:
                     "No embedding adapter provided and fastembed is not installed. "
                     "Install with: pip install kemi[local] or provide your own: "
                     "Memory(embed=YourAdapter())"
-                )
+                ) from e
         else:
             self._embed = embed
 
@@ -55,7 +54,7 @@ class Memory:
         content: str,
         importance: float = 0.5,
         source: MemorySource = MemorySource.USER_STATED,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         sanitize_input: bool = False,
     ) -> str:
         if sanitize_input:
@@ -90,9 +89,7 @@ class Memory:
             ],
         )
 
-        duplicates = dedup.find_duplicates(
-            new_memory, existing, self._config.dedup_threshold
-        )
+        duplicates = dedup.find_duplicates(new_memory, existing, self._config.dedup_threshold)
 
         if duplicates:
             resolved = dedup.resolve_duplicate(new_memory, duplicates[0])
@@ -124,8 +121,8 @@ class Memory:
         query: str,
         top_k: int = 5,
         max_tokens: Optional[int] = None,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         query_embedding = self._embed.embed_single(query)
 
         if lifecycle_filter is None:
@@ -154,9 +151,7 @@ class Memory:
         for mem in final_results:
             mem.last_accessed_at = datetime.utcnow()
 
-            new_state = lifecycle.evaluate_lifecycle(
-                mem, self._config.decay_threshold_hours
-            )
+            new_state = lifecycle.evaluate_lifecycle(mem, self._config.decay_threshold_hours)
 
             if new_state != mem.lifecycle_state:
                 updated = lifecycle.transition(mem, new_state)

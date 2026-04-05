@@ -1,4 +1,4 @@
-from typing import Callable, List
+from typing import Callable
 
 from kemi.adapters.base import EmbeddingAdapter
 
@@ -11,16 +11,16 @@ class CustomEmbedAdapter(EmbeddingAdapter):
 
     def __init__(
         self,
-        embed_fn: Callable[[List[str]], List[List[float]]],
+        embed_fn: Callable[[list[str]], list[list[float]]],
         dim: int,
     ):
         self._embed_fn = embed_fn
         self._dim = dim
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         return self._embed_fn(texts)
 
-    def embed_single(self, text: str) -> List[float]:
+    def embed_single(self, text: str) -> list[float]:
         return self.embed([text])[0]
 
     def dimension(self) -> int:

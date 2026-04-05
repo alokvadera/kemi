@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Optional
 
 from kemi.models import LifecycleState, MemoryObject
 
 
 class EmbeddingAdapter(ABC):
     @abstractmethod
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts into vectors.
 
         Args:
@@ -19,7 +19,7 @@ class EmbeddingAdapter(ABC):
         pass
 
     @abstractmethod
-    def embed_single(self, text: str) -> List[float]:
+    def embed_single(self, text: str) -> list[float]:
         """Embed a single text into a vector.
 
         Args:
@@ -65,10 +65,10 @@ class StorageAdapter(ABC):
     def search(
         self,
         user_id: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         """Search for memories similar to the query embedding.
 
         The adapter is responsible for:
@@ -147,8 +147,8 @@ class StorageAdapter(ABC):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         """Get all memories for a user.
 
         Used for:

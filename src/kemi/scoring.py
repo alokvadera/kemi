@@ -1,10 +1,10 @@
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import Callable, Optional
 
 from kemi.models import MemoryObject
 
 
-def cosine_similarity(a: List[float], b: List[float]) -> float:
+def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors.
 
     Returns 0.0 if either vector is all zeros to avoid division by zero.
@@ -49,7 +49,7 @@ def temporal_recency(last_accessed: datetime, half_life_hours: float = 168.0) ->
     return 2.0 ** (-hours_elapsed / half_life_hours)
 
 
-def score_memory(memory: MemoryObject, query_embedding: List[float]) -> float:
+def score_memory(memory: MemoryObject, query_embedding: list[float]) -> float:
     """Compute final relevance score for a memory.
 
     Formula: (cosine_similarity × 0.5) + (temporal_recency × 0.3) + (importance × 0.2)
@@ -68,9 +68,7 @@ def score_memory(memory: MemoryObject, query_embedding: List[float]) -> float:
     return (cosine_score * 0.5) + (recency_score * 0.3) + (importance_score * 0.2)
 
 
-def rank_memories(
-    memories: List[MemoryObject], query_embedding: List[float]
-) -> List[MemoryObject]:
+def rank_memories(memories: list[MemoryObject], query_embedding: list[float]) -> list[MemoryObject]:
     """Rank memories by computed score, highest first.
 
     Mutates the score field on each MemoryObject in place.
@@ -88,10 +86,10 @@ def _default_token_counter(text: str) -> int:
 
 
 def truncate_by_tokens(
-    memories: List[MemoryObject],
+    memories: list[MemoryObject],
     max_tokens: Optional[int],
     token_counter: Optional[Callable[[str], int]] = None,
-) -> List[MemoryObject]:
+) -> list[MemoryObject]:
     """Truncate memories by token budget.
 
     Walks ranked list, sums token counts, stops when budget reached.

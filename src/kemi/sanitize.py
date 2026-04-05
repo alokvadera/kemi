@@ -1,8 +1,7 @@
 import re
-from typing import List, Pattern
+from re import Pattern
 
-
-_SUSPICIOUS_PATTERNS: List[Pattern[str]] = [
+_SUSPICIOUS_PATTERNS: list[Pattern[str]] = [
     re.compile(r"(?i)\bignore\s+(all\s+)?previous\s+instructions\b"),
     re.compile(r"(?i)\byou\s+are\s+now\b"),
     re.compile(r"(?i)^\s*system\s*:", re.MULTILINE),
@@ -12,7 +11,7 @@ _SUSPICIOUS_PATTERNS: List[Pattern[str]] = [
     re.compile(r"(?i)\bignore\s+all\b"),
 ]
 
-_ROLE_PREFIXES: List[Pattern[str]] = [
+_ROLE_PREFIXES: list[Pattern[str]] = [
     re.compile(r"(?i)^\s*user\s*:\s*", re.MULTILINE),
     re.compile(r"(?i)^\s*assistant\s*:\s*", re.MULTILINE),
     re.compile(r"(?i)^\s*system\s*:\s*", re.MULTILINE),

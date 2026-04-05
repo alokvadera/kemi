@@ -1,6 +1,6 @@
-import pytest
-
 from datetime import datetime, timedelta
+
+import pytest
 
 from kemi import lifecycle
 from kemi.models import LifecycleState, MemoryObject, MemorySource

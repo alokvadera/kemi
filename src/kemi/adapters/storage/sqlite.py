@@ -2,12 +2,11 @@ import json
 import sqlite3
 import struct
 from datetime import datetime
-from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
+from kemi import scoring
 from kemi.adapters.base import StorageAdapter
 from kemi.models import LifecycleState, MemoryObject, MemorySource
-from kemi import scoring
 
 
 class SQLiteStorageAdapter(StorageAdapter):
@@ -61,14 +60,13 @@ class SQLiteStorageAdapter(StorageAdapter):
                 )
             """)
 
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_memories_lifecycle ON memories(lifecycle_state)"
             )
             conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_memories_user_lifecycle ON memories(user_id, lifecycle_state)"
+                "CREATE INDEX IF NOT EXISTS idx_memories_user_lifecycle "
+                "ON memories(user_id, lifecycle_state)"
             )
 
     def _row_to_memory(self, row) -> MemoryObject:
@@ -116,11 +114,11 @@ class SQLiteStorageAdapter(StorageAdapter):
             row = self._memory_to_row(memory)
             conn.execute(
                 """
-                INSERT OR REPLACE INTO memories 
-                (memory_id, user_id, content, embedding, embedding_dim, created_at, 
+                INSERT OR REPLACE INTO memories
+                (memory_id, user_id, content, embedding, embedding_dim, created_at,
                  last_accessed_at, source, importance, lifecycle_state, metadata)
                 VALUES (:memory_id, :user_id, :content, :embedding, :embedding_dim,
-                        :created_at, :last_accessed_at, :source, :importance, 
+                        :created_at, :last_accessed_at, :source, :importance,
                         :lifecycle_state, :metadata)
             """,
                 row,
@@ -129,10 +127,10 @@ class SQLiteStorageAdapter(StorageAdapter):
     def search(
         self,
         user_id: str,
-        query_embedding: List[float],
+        query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
 
@@ -141,7 +139,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT * FROM memories 
+                SELECT * FROM memories
                 WHERE user_id = ? AND lifecycle_state IN ({})
             """.format(",".join("?" * len(states))),
                 [user_id] + states,
@@ -153,9 +151,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         for row in rows:
             memory = self._row_to_memory(row)
             if memory.embedding:
-                similarity = scoring.cosine_similarity(
-                    memory.embedding, query_embedding
-                )
+                similarity = scoring.cosine_similarity(memory.embedding, query_embedding)
                 memory.score = (similarity + 1.0) / 2.0
                 memories.append(memory)
 
@@ -164,9 +160,7 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def get(self, memory_id: str) -> Optional[MemoryObject]:
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM memories WHERE memory_id = ?", (memory_id,)
-            )
+            cursor = conn.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
             row = cursor.fetchone()
 
         if row:
@@ -183,16 +177,14 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def delete_by_id(self, memory_id: str) -> bool:
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "DELETE FROM memories WHERE memory_id = ?", (memory_id,)
-            )
+            cursor = conn.execute("DELETE FROM memories WHERE memory_id = ?", (memory_id,))
         return cursor.rowcount > 0
 
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[List[LifecycleState]] = None,
-    ) -> List[MemoryObject]:
+        lifecycle_filter: Optional[list[LifecycleState]] = None,
+    ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
 
@@ -201,7 +193,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         with self._get_connection() as conn:
             cursor = conn.execute(
                 """
-                SELECT * FROM memories 
+                SELECT * FROM memories
                 WHERE user_id = ? AND lifecycle_state IN ({})
             """.format(",".join("?" * len(states))),
                 [user_id] + states,
@@ -213,9 +205,7 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def count(self, user_id: str) -> int:
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT COUNT(*) FROM memories WHERE user_id = ?", (user_id,)
-            )
+            cursor = conn.execute("SELECT COUNT(*) FROM memories WHERE user_id = ?", (user_id,))
             return cursor.fetchone()[0]
 
     def upgrade_schema(self, from_version: int, to_version: int) -> None:

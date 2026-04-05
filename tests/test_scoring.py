@@ -165,7 +165,7 @@ def test_cosine_similarity_empty_vectors() -> None:
 
 
 def test_temporal_recency_exact_now() -> None:
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     now = datetime.utcnow()
     result = scoring.temporal_recency(now, half_life_hours=168.0)
@@ -233,7 +233,10 @@ def test_truncate_by_tokens_with_custom_counter() -> None:
             embedding_dim=64,
         ),
     ]
-    custom_counter = lambda text: 10
+
+    def custom_counter(text):
+        return 10
+
     result = scoring.truncate_by_tokens(memories, max_tokens=5, token_counter=custom_counter)
     assert len(result) == 1
 

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 
 class MemorySource(Enum):
@@ -22,14 +22,14 @@ class MemoryObject:
     memory_id: str
     user_id: str
     content: str
-    embedding: Optional[List[float]] = None
+    embedding: Optional[list[float]] = None
     score: float = 0.0
     created_at: datetime = field(default_factory=datetime.utcnow)
     last_accessed_at: datetime = field(default_factory=datetime.utcnow)
     source: MemorySource = MemorySource.USER_STATED
     importance: float = 0.5
     lifecycle_state: LifecycleState = LifecycleState.ACTIVE
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     embedding_dim: Optional[int] = None
 
 

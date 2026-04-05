@@ -1,5 +1,5 @@
 import os
-from typing import List, Optional
+from typing import Optional
 
 from kemi.adapters.base import EmbeddingAdapter
 
@@ -25,11 +25,11 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
                 from openai import OpenAI
 
                 self._client = OpenAI(api_key=self._api_key)
-            except ImportError:
-                raise ImportError("openai not installed. Run: pip install kemi[openai]")
+            except ImportError as e:
+                raise ImportError("openai not installed. Run: pip install kemi[openai]") from e
         return self._client
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
 
@@ -38,7 +38,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
 
         return [item.embedding for item in response.data]
 
-    def embed_single(self, text: str) -> List[float]:
+    def embed_single(self, text: str) -> list[float]:
         return self.embed([text])[0]
 
     def dimension(self) -> int:

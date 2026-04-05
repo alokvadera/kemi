@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import List
 
 from kemi.models import LifecycleState, MemoryObject
 
@@ -58,7 +57,7 @@ def transition(memory: MemoryObject, new_state: LifecycleState) -> MemoryObject:
     )
 
 
-def get_recall_filter() -> List[LifecycleState]:
+def get_recall_filter() -> list[LifecycleState]:
     """Return the list of lifecycle states that should be included in recall results.
 
     Excludes ARCHIVED and DELETED. Includes ACTIVE and DECAYING.

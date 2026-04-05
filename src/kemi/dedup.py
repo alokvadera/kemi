@@ -1,14 +1,12 @@
-from typing import List
-
 from kemi.models import MemoryObject
 from kemi.scoring import cosine_similarity
 
 
 def find_duplicates(
     new_memory: MemoryObject,
-    existing_memories: List[MemoryObject],
+    existing_memories: list[MemoryObject],
     threshold: float = 0.85,
-) -> List[MemoryObject]:
+) -> list[MemoryObject]:
     """Find memories that are semantically similar to new_memory.
 
     Returns memories with cosine similarity strictly above threshold (>= threshold is NOT included).
@@ -33,15 +31,15 @@ def find_duplicates(
 
 def find_conflicts(
     new_memory: MemoryObject,
-    existing_memories: List[MemoryObject],
+    existing_memories: list[MemoryObject],
     conflict_threshold: float = 0.65,
     dedup_threshold: float = 0.85,
-) -> List[MemoryObject]:
+) -> list[MemoryObject]:
     """Find memories that are potentially conflicting with new_memory.
 
-    Returns memories with similarity strictly between conflict_threshold and dedup_threshold.
-    This range excludes duplicates (above dedup_threshold) and excludes unrelated (below conflict_threshold).
-    Default: 0.65 < similarity < 0.85
+    Returns memories with similarity strictly between conflict_threshold and
+    dedup_threshold. This range excludes duplicates (above dedup_threshold) and
+    excludes unrelated (below conflict_threshold). Default: 0.65 < similarity < 0.85
     """
     if not new_memory.embedding or not existing_memories:
         return []

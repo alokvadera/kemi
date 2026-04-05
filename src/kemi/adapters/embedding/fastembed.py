@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Optional
 
 from kemi.adapters.base import EmbeddingAdapter
 
@@ -11,7 +11,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
     Lazy-loads the model on first embed() call to avoid import-time errors.
     """
 
-    MODEL_NAME = "BaaI/bge-small-en-v1.5"
+    MODEL_NAME = "BAAI/bge-small-en-v1.5"
     DIMENSION = 384
 
     def __init__(self, model_name: Optional[str] = None):
@@ -24,19 +24,17 @@ class FastEmbedAdapter(EmbeddingAdapter):
                 from fastembed import TextEmbedding
 
                 self._model = TextEmbedding(model_name=self._model_name)
-            except ImportError:
-                raise ImportError(
-                    "fastembed not installed. Run: pip install kemi[local]"
-                )
+            except ImportError as e:
+                raise ImportError("fastembed not installed. Run: pip install kemi[local]") from e
         return self._model
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         model = self._get_model()
         return list(model.embed(texts))
 
-    def embed_single(self, text: str) -> List[float]:
+    def embed_single(self, text: str) -> list[float]:
         return self.embed([text])[0]
 
     def dimension(self) -> int:

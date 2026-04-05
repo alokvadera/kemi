@@ -1,4 +1,3 @@
-import pytest
 
 from kemi import sanitize
 

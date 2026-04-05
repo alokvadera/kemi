@@ -1,4 +1,3 @@
-import pytest
 
 from kemi import dedup
 from kemi.models import LifecycleState, MemoryObject, MemorySource
