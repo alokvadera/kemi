@@ -64,6 +64,22 @@ memory.remember("user123", "User prefers concise responses")
 results = memory.recall("user123", "communication style")
 ```
 
+### Async usage (FastAPI, asyncio)
+
+```python
+from fastapi import FastAPI
+from kemi import Memory
+
+app = FastAPI()
+memory = Memory()
+
+@app.post("/chat")
+async def chat(user_id: str, message: str):
+    await memory.aremember(user_id, message)
+    context = await memory.acontext_block(user_id, message)
+    return {"context": context}
+```
+
 ### Inject into system prompt
 
 ```python
