@@ -53,12 +53,11 @@ memory.forget("user123")
 
 ## Where data is stored
 
-By default, `kemi.db` is created in the current working directory:
+By default, kemi stores memories in ~/.kemi/memories.db — your home directory. This means the same memories are available regardless of which directory you run your script from.
 
 ```
-.
-├── kemi.db          # SQLite database with all memories
-├── your_script.py   # your code
+~/.kemi/
+└── memories.db    # all your memories, always in the same place
 ```
 
 The database contains:
@@ -68,7 +67,7 @@ The database contains:
 
 ## Custom database path
 
-To store memories elsewhere:
+To use a different path:
 
 ```python
 from kemi import Memory
