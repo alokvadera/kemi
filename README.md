@@ -2,6 +2,8 @@
 
 Persistent memory for AI agents. Three methods. Zero infra.
 
+[![asciicast](https://asciinema.org/a/683480.svg)](https://asciinema.org/a/683480)
+
 ```python
 from kemi import Memory
 
