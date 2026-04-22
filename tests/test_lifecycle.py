@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -13,8 +13,8 @@ def test_evaluate_lifecycle_active() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -27,7 +27,7 @@ def test_evaluate_lifecycle_active() -> None:
 
 
 def test_evaluate_lifecycle_decaying() -> None:
-    old_time = datetime.utcnow() - timedelta(hours=800)
+    old_time = datetime.now(timezone.utc) - timedelta(hours=800)
     mem = MemoryObject(
         memory_id="test",
         user_id="user",
@@ -54,8 +54,8 @@ def test_transition_valid() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -74,8 +74,8 @@ def test_transition_invalid() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -94,8 +94,8 @@ def test_transition_no_mutation() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -124,8 +124,8 @@ def test_evaluate_lifecycle_deleted_state() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.DELETED,
@@ -144,8 +144,8 @@ def test_evaluate_lifecycle_archived_state() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ARCHIVED,
@@ -160,14 +160,14 @@ def test_evaluate_lifecycle_archived_state() -> None:
 def test_evaluate_lifecycle_future_access() -> None:
     from datetime import timedelta
 
-    future = datetime.utcnow() + timedelta(hours=1)
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
     mem = MemoryObject(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
         last_accessed_at=future,
         source=MemorySource.USER_STATED,
         importance=0.5,
@@ -187,8 +187,8 @@ def test_transition_decaying_to_active() -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.DECAYING,

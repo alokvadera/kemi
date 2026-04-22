@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from kemi.models import MemoryObject
 from kemi.scoring import cosine_similarity
 
@@ -163,10 +165,11 @@ def resolve_duplicate(
         embedding=existing.embedding,
         score=0.0,
         created_at=existing.created_at,
-        last_accessed_at=datetime.utcnow(),
+        last_accessed_at=datetime.now(timezone.utc),
         source=existing.source,
         importance=existing.importance,
         lifecycle_state=existing.lifecycle_state,
         metadata=existing.metadata.copy() if existing.metadata else {},
         embedding_dim=existing.embedding_dim,
+        tags=new_memory.tags,
     )

@@ -1,6 +1,4 @@
 import os
-from typing import Optional
-
 from kemi.adapters.base import EmbeddingAdapter
 
 
@@ -14,7 +12,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
     DEFAULT_MODEL = "text-embedding-3-small"
     DEFAULT_DIMENSION = 1536
 
-    def __init__(self, api_key: Optional[str] = None, model_name: Optional[str] = None):
+    def __init__(self, api_key: str | None = None, model_name: str | None = None):
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         self._model_name = model_name or self.DEFAULT_MODEL
         self._client = None

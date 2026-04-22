@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+
 
 from kemi import scoring
 from kemi.adapters.base import StorageAdapter
@@ -43,6 +43,7 @@ class JSONStorageAdapter(StorageAdapter):
             lifecycle_state=LifecycleState(data["lifecycle_state"]),
             metadata=data.get("metadata", {}),
             embedding_dim=data.get("embedding_dim"),
+            tags=data.get("tags", []),
         )
 
     def store(self, memory: MemoryObject) -> None:
@@ -58,6 +59,7 @@ class JSONStorageAdapter(StorageAdapter):
             "lifecycle_state": memory.lifecycle_state.value,
             "metadata": memory.metadata,
             "embedding_dim": memory.embedding_dim,
+            "tags": memory.tags,
         }
         self._save()
 
@@ -66,7 +68,7 @@ class JSONStorageAdapter(StorageAdapter):
         user_id: str,
         query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -89,7 +91,7 @@ class JSONStorageAdapter(StorageAdapter):
         memories.sort(key=lambda m: m.score, reverse=True)
         return memories[:top_k]
 
-    def get(self, memory_id: str) -> Optional[MemoryObject]:
+    def get(self, memory_id: str) -> MemoryObject | None:
         mem_data = self._data["memories"].get(memory_id)
         if mem_data:
             return self._row_to_memory(mem_data)
@@ -116,7 +118,7 @@ class JSONStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -132,6 +134,32 @@ class JSONStorageAdapter(StorageAdapter):
     def count(self, user_id: str) -> int:
         return sum(1 for m in self._data["memories"].values() if m["user_id"] == user_id)
 
+    def get_all(self) -> list[MemoryObject]:
+        return [self._row_to_memory(m) for m in self._data["memories"].values()]
+
+    def get_all_users(self) -> list[str]:
+        users = set(m["user_id"] for m in self._data["memories"].values())
+        return list(users)
+
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         self._data["schema_version"] = to_version
         self._save()
+
+    def get_by_tag(
+        self,
+        user_id: str,
+        tag: str,
+        lifecycle_filter: list[LifecycleState] | None = None,
+    ) -> list[MemoryObject]:
+        if lifecycle_filter is None:
+            lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
+
+        states = {s.value for s in lifecycle_filter}
+
+        return [
+            self._row_to_memory(m)
+            for m in self._data["memories"].values()
+            if m["user_id"] == user_id
+            and m["lifecycle_state"] in states
+            and tag in m.get("tags", [])
+        ]

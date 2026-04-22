@@ -161,3 +161,49 @@ print(results[0].content)
 ```
 
 This uses Ollama's local embedding model instead of fastembed or OpenAI.
+
+## Recipe 5: LangChain integration
+
+```python
+# pip install kemi[langchain] langchain langchain-openai
+
+from kemi import Memory
+from kemi.integrations.langchain import KemiMemory
+from langchain_openai import ChatOpenAI
+from langchain.agents import AgentExecutor, create_openai_functions_agent
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+# Initialize kemi memory
+memory = Memory()
+
+# Create LangChain memory adapter
+chat_memory = KemiMemory(user_id="alice", memory=memory)
+
+# Build prompt
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "You are a helpful assistant."),
+    MessagesPlaceholder(variable_name="chat_history", optional=True),
+    ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad"),
+])
+
+# Create agent
+agent = create_openai_functions_agent(
+    ChatOpenAI(model="gpt-4o-mini"),
+    prompt,
+    tools=[],
+)
+
+# Create executor with memory
+executor = AgentExecutor(
+    agent=agent,
+    tools=[],
+    memory=chat_memory,
+)
+
+# Run conversations - memory persists automatically
+executor.invoke({"input": "My name is Alice"})
+executor.invoke({"input": "What's my name?"})  # Agent knows your name from memory
+```
+
+The `KemiMemory` class automatically stores every human message to kemi and retrieves relevant context for each new conversation turn.

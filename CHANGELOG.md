@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0] - 2026-04-19
+### Added
+- CLI — kemi list, recall, forget, export, import, stats commands
+- Installable as console script: pip install kemi then use kemi command directly
+
+## [0.2.1] - 2026-04-19
+### Fixed
+- Replaced deprecated asyncio.get_event_loop() in all async methods
+- Added full test coverage for export() and import_from()
+- CustomStorageAdapter.get_all() now raises clear NotImplementedError instead of silently crashing
+
+## [0.2.0] - 2026-04-19
+### Added
+- MCP server (kemi[mcp]) — expose kemi as an MCP tool server, startable with: python -m kemi.mcp_server
+- Export/Import — memory.export("backup.json") and memory.import_from("backup.json") with async versions
+- LangChain adapter (kemi[langchain]) — KemiMemory class with save_context() and load_memory_variables()
+- First-run download warning — clear stderr message before 130MB model download
+
 ## [0.1.7] - 2026-04-06
 ### Added
 - Input validation with descriptive error messages on all core methods

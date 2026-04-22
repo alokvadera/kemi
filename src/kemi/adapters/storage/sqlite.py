@@ -2,7 +2,7 @@ import json
 import sqlite3
 import struct
 from datetime import datetime
-from typing import Optional
+
 
 from kemi import scoring
 from kemi.adapters.base import StorageAdapter
@@ -16,7 +16,7 @@ class SQLiteStorageAdapter(StorageAdapter):
     Schema version tracked in schema_version table.
     """
 
-    CURRENT_VERSION = 1
+    CURRENT_VERSION = 2
 
     def __init__(self, db_path: str = "kemi.db"):
         self._db_path = db_path
@@ -34,6 +34,18 @@ class SQLiteStorageAdapter(StorageAdapter):
         conn.execute("PRAGMA journal_mode=WAL")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def __del__(self) -> None:
+        if self._shared_conn is not None:
+            try:
+                self._shared_conn.close()
+            except Exception:
+                pass
+
+    def close(self) -> None:
+        if self._shared_conn is not None:
+            self._shared_conn.close()
+            self._shared_conn = None
 
     def _init_schema(self):
         with self._get_connection() as conn:
@@ -56,7 +68,8 @@ class SQLiteStorageAdapter(StorageAdapter):
                     source TEXT NOT NULL DEFAULT 'user_stated',
                     importance REAL NOT NULL DEFAULT 0.5,
                     lifecycle_state TEXT NOT NULL DEFAULT 'active',
-                    metadata TEXT NOT NULL DEFAULT '{}'
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    tags TEXT NOT NULL DEFAULT ''
                 )
             """)
 
@@ -68,6 +81,33 @@ class SQLiteStorageAdapter(StorageAdapter):
                 "CREATE INDEX IF NOT EXISTS idx_memories_user_lifecycle "
                 "ON memories(user_id, lifecycle_state)"
             )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories(tags)")
+
+            self._run_migrations(conn)
+
+    def _get_schema_version(self, conn) -> int:
+        try:
+            cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
+            row = cursor.fetchone()
+            if row:
+                return row[0]
+            return 0
+        except sqlite3.OperationalError:
+            return 0
+
+    def _run_migrations(self, conn) -> None:
+        current = self._get_schema_version(conn)
+
+        if current >= self.CURRENT_VERSION:
+            return
+
+        if current < 2:
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+
+            conn.execute("INSERT OR REPLACE INTO schema_version (version) VALUES (2)")
 
     def _row_to_memory(self, row) -> MemoryObject:
         embedding = None
@@ -88,6 +128,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             lifecycle_state=LifecycleState(row["lifecycle_state"]),
             metadata=json.loads(row["metadata"]),
             embedding_dim=row["embedding_dim"],
+            tags=[t.replace("\\,", ",") for t in row["tags"].split(",")] if row["tags"] else [],
         )
 
     def _memory_to_row(self, memory: MemoryObject) -> dict:
@@ -107,6 +148,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             "importance": memory.importance,
             "lifecycle_state": memory.lifecycle_state.value,
             "metadata": json.dumps(memory.metadata),
+            "tags": ",".join(t.replace(",", "\\,") for t in memory.tags) if memory.tags else "",
         }
 
     def store(self, memory: MemoryObject) -> None:
@@ -116,10 +158,10 @@ class SQLiteStorageAdapter(StorageAdapter):
                 """
                 INSERT OR REPLACE INTO memories
                 (memory_id, user_id, content, embedding, embedding_dim, created_at,
-                 last_accessed_at, source, importance, lifecycle_state, metadata)
+                 last_accessed_at, source, importance, lifecycle_state, metadata, tags)
                 VALUES (:memory_id, :user_id, :content, :embedding, :embedding_dim,
                         :created_at, :last_accessed_at, :source, :importance,
-                        :lifecycle_state, :metadata)
+                        :lifecycle_state, :metadata, :tags)
             """,
                 row,
             )
@@ -129,7 +171,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         user_id: str,
         query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -158,7 +200,7 @@ class SQLiteStorageAdapter(StorageAdapter):
         memories.sort(key=lambda m: m.score, reverse=True)
         return memories[:top_k]
 
-    def get(self, memory_id: str) -> Optional[MemoryObject]:
+    def get(self, memory_id: str) -> MemoryObject | None:
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT * FROM memories WHERE memory_id = ?", (memory_id,))
             row = cursor.fetchone()
@@ -183,7 +225,7 @@ class SQLiteStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -208,12 +250,43 @@ class SQLiteStorageAdapter(StorageAdapter):
             cursor = conn.execute("SELECT COUNT(*) FROM memories WHERE user_id = ?", (user_id,))
             return cursor.fetchone()[0]
 
+    def get_all(self) -> list[MemoryObject]:
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT * FROM memories")
+            rows = cursor.fetchall()
+            return [self._row_to_memory(row) for row in rows]
+
+    def get_all_users(self) -> list[str]:
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT DISTINCT user_id FROM memories")
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         with self._get_connection() as conn:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO schema_version (version, applied_at)
-                VALUES (?, datetime('now'))
+            self._run_migrations(conn)
+
+    def get_by_tag(
+        self,
+        user_id: str,
+        tag: str,
+        lifecycle_filter: list[LifecycleState] | None = None,
+    ) -> list[MemoryObject]:
+        if lifecycle_filter is None:
+            lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
+
+        states = [s.value for s in lifecycle_filter]
+
+        with self._get_connection() as conn:
+            placeholders = ",".join("?" * len(states))
+            cursor = conn.execute(
+                f"""
+                SELECT * FROM memories
+                WHERE user_id = ? AND lifecycle_state IN ({placeholders})
+                AND (',' || tags || ',') LIKE ('%,' || ? || ',%')
             """,
-                (to_version,),
+                [user_id] + states + [tag],
             )
+            rows = cursor.fetchall()
+
+        return [self._row_to_memory(row) for row in rows]

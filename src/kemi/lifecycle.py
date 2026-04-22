@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from kemi.models import LifecycleState, MemoryObject
 
@@ -20,7 +20,7 @@ def evaluate_lifecycle(
     if memory.lifecycle_state == LifecycleState.ARCHIVED:
         return LifecycleState.ARCHIVED
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     hours_since_access = (now - memory.last_accessed_at).total_seconds() / 3600.0
 
     if hours_since_access < 0:

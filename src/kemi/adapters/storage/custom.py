@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from typing import Callable
 
 from kemi.adapters.base import StorageAdapter
 from kemi.models import LifecycleState, MemoryObject
@@ -12,15 +12,16 @@ class CustomStorageAdapter(StorageAdapter):
 
     def __init__(
         self,
-        store_fn: Optional[Callable[[MemoryObject], None]] = None,
-        search_fn: Optional[Callable[..., list[MemoryObject]]] = None,
-        get_fn: Optional[Callable[[str], Optional[MemoryObject]]] = None,
-        update_fn: Optional[Callable[[MemoryObject], None]] = None,
-        delete_by_user_fn: Optional[Callable[[str], int]] = None,
-        delete_by_id_fn: Optional[Callable[[str], bool]] = None,
-        get_all_by_user_fn: Optional[Callable[..., list[MemoryObject]]] = None,
-        count_fn: Optional[Callable[[str], int]] = None,
-        upgrade_schema_fn: Optional[Callable[[int, int], None]] = None,
+        store_fn: Callable[[MemoryObject], None] | None = None,
+        search_fn: Callable[..., list[MemoryObject]] | None = None,
+        get_fn: Callable[[str], MemoryObject | None] | None = None,
+        update_fn: Callable[[MemoryObject], None] | None = None,
+        delete_by_user_fn: Callable[[str], int] | None = None,
+        delete_by_id_fn: Callable[[str], bool] | None = None,
+        get_all_by_user_fn: Callable[..., list[MemoryObject]] | None = None,
+        get_all_fn: Callable[[], list[MemoryObject]] | None = None,
+        count_fn: Callable[[str], int] | None = None,
+        upgrade_schema_fn: Callable[[int, int], None] | None = None,
     ):
         self._fns = {
             "store": store_fn,
@@ -30,6 +31,7 @@ class CustomStorageAdapter(StorageAdapter):
             "delete_by_user": delete_by_user_fn,
             "delete_by_id": delete_by_id_fn,
             "get_all_by_user": get_all_by_user_fn,
+            "get_all": get_all_fn,
             "count": count_fn,
             "upgrade_schema": upgrade_schema_fn,
         }
@@ -50,11 +52,11 @@ class CustomStorageAdapter(StorageAdapter):
         user_id: str,
         query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         return self._get_fn("search")(user_id, query_embedding, top_k, lifecycle_filter)
 
-    def get(self, memory_id: str) -> Optional[MemoryObject]:
+    def get(self, memory_id: str) -> MemoryObject | None:
         return self._get_fn("get")(memory_id)
 
     def update(self, memory: MemoryObject) -> None:
@@ -69,12 +71,34 @@ class CustomStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         return self._get_fn("get_all_by_user")(user_id, lifecycle_filter)
 
     def count(self, user_id: str) -> int:
         return self._get_fn("count")(user_id)
+
+    def get_all(self) -> list[MemoryObject]:
+        fn = self._fns.get("get_all")
+        if fn is None:
+            raise NotImplementedError(
+                "get_all not implemented in your CustomStorageAdapter. "
+                "Add a get_all function to use export()"
+            )
+        return fn()
+
+    def get_all_users(self) -> list[str]:
+        fn = self._fns.get("get_all_users")
+        if fn is None:
+            fn = self._fns.get("get_all")
+            if fn is None:
+                raise NotImplementedError(
+                    "get_all_users not implemented in your CustomStorageAdapter. "
+                    "Add a get_all_users function to use list_users()"
+                )
+            all_memories = fn()
+            return list(set(m.user_id for m in all_memories))
+        return fn()
 
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         self._get_fn("upgrade_schema")(from_version, to_version)

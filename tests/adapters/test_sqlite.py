@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -18,8 +18,8 @@ def test_store_and_get(sqlite_adapter) -> None:
         content="I am vegetarian",
         embedding=[0.1] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.AGENT_INFERRED,
         importance=0.7,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -46,8 +46,8 @@ def test_search_returns_results(sqlite_adapter) -> None:
         content="I am vegetarian",
         embedding=[1.0] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -61,8 +61,8 @@ def test_search_returns_results(sqlite_adapter) -> None:
         content="I live in Mumbai",
         embedding=[0.1] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -86,8 +86,8 @@ def test_search_lifecycle_filter(sqlite_adapter) -> None:
         content="active memory",
         embedding=[1.0] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -101,8 +101,8 @@ def test_search_lifecycle_filter(sqlite_adapter) -> None:
         content="deleted memory",
         embedding=[1.0] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.DELETED,
@@ -126,8 +126,8 @@ def test_delete_by_id(sqlite_adapter) -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -150,8 +150,8 @@ def test_delete_by_user(sqlite_adapter) -> None:
         content="test1",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -165,8 +165,8 @@ def test_delete_by_user(sqlite_adapter) -> None:
         content="test2",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -188,8 +188,8 @@ def test_count(sqlite_adapter) -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -209,8 +209,8 @@ def test_source_roundtrip(sqlite_adapter) -> None:
         content="test",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.AGENT_INFERRED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -233,8 +233,8 @@ def test_embedding_roundtrip(sqlite_adapter) -> None:
         content="test",
         embedding=embedding,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -258,8 +258,8 @@ def test_search_empty_query_embedding(sqlite_adapter) -> None:
         content="test",
         embedding=[0.0] * 64,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -279,8 +279,8 @@ def test_get_all_by_user_sqlite(sqlite_adapter) -> None:
         content="test1",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.ACTIVE,
@@ -294,8 +294,8 @@ def test_get_all_by_user_sqlite(sqlite_adapter) -> None:
         content="test2",
         embedding=None,
         score=0.0,
-        created_at=datetime.utcnow(),
-        last_accessed_at=datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
         lifecycle_state=LifecycleState.DECAYING,
@@ -308,3 +308,84 @@ def test_get_all_by_user_sqlite(sqlite_adapter) -> None:
 
     results = sqlite_adapter.get_all_by_user("user1")
     assert len(results) == 2
+
+
+def test_get_by_tag_exact_match_no_false_positives(sqlite_adapter) -> None:
+    """Test that searching for 'cat' doesn't match 'category'."""
+    mem1 = MemoryObject(
+        memory_id="id1",
+        user_id="user1",
+        content="I have a pet cat",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+        tags=["pet", "cat"],
+    )
+
+    mem2 = MemoryObject(
+        memory_id="id2",
+        user_id="user1",
+        content="I work in the category industry",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+        tags=["work", "category"],
+    )
+
+    sqlite_adapter.store(mem1)
+    sqlite_adapter.store(mem2)
+
+    results = sqlite_adapter.get_by_tag("user1", "cat")
+
+    assert len(results) == 1
+    assert results[0].memory_id == "id1"
+    assert "cat" in results[0].tags
+    assert "category" not in results[0].tags
+
+
+def test_migration_creates_schema_version_table(sqlite_adapter) -> None:
+    cursor = sqlite_adapter._get_connection().execute("SELECT version FROM schema_version LIMIT 1")
+    row = cursor.fetchone()
+    assert row is not None
+    assert row[0] == 2
+
+
+def test_migration_idempotent(sqlite_adapter) -> None:
+    sqlite_adapter.upgrade_schema(1, 2)
+    sqlite_adapter.upgrade_schema(1, 2)
+
+    cursor = sqlite_adapter._get_connection().execute("SELECT version FROM schema_version LIMIT 1")
+    row = cursor.fetchone()
+    assert row[0] == 2
+
+
+def test_sqlite_close() -> None:
+    adapter = SQLiteStorageAdapter(db_path=":memory:")
+    adapter.close()
+    assert adapter._shared_conn is None
+
+
+def test_get_connection_creates_new_conn() -> None:
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = os.path.join(tmpdir, "test.db")
+        adapter = SQLiteStorageAdapter(db_path=db_path)
+
+        conn = adapter._get_connection()
+        cursor = conn.execute("SELECT 1")
+        row = cursor.fetchone()
+        assert row[0] == 1

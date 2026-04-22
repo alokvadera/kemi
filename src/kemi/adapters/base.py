@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from kemi.models import LifecycleState, MemoryObject
 
@@ -67,7 +66,7 @@ class StorageAdapter(ABC):
         user_id: str,
         query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         """Search for memories similar to the query embedding.
 
@@ -93,7 +92,7 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
-    def get(self, memory_id: str) -> Optional[MemoryObject]:
+    def get(self, memory_id: str) -> MemoryObject | None:
         """Retrieve a single memory by ID.
 
         Args:
@@ -147,7 +146,7 @@ class StorageAdapter(ABC):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         """Get all memories for a user.
 
@@ -178,6 +177,28 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
+    def get_all(self) -> list[MemoryObject]:
+        """Get ALL memories from the store.
+
+        Used for export/backup.
+
+        Returns:
+            List of all MemoryObjects in the store.
+        """
+        pass
+
+    @abstractmethod
+    def get_all_users(self) -> list[str]:
+        """Get all unique user IDs that have memories.
+
+        Used for listing users.
+
+        Returns:
+            List of unique user IDs.
+        """
+        pass
+
+    @abstractmethod
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         """Migrate the storage schema between versions.
 
@@ -186,5 +207,24 @@ class StorageAdapter(ABC):
         Args:
             from_version: Current schema version.
             to_version: Target schema version.
+        """
+        pass
+
+    @abstractmethod
+    def get_by_tag(
+        self,
+        user_id: str,
+        tag: str,
+        lifecycle_filter: list[LifecycleState] | None = None,
+    ) -> list[MemoryObject]:
+        """Get all memories with a specific tag for a user.
+
+        Args:
+            user_id: The user whose memories to search.
+            tag: The tag to filter by.
+            lifecycle_filter: Only include memories in these states.
+
+        Returns:
+            List of MemoryObjects with the specified tag.
         """
         pass

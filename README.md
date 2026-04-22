@@ -113,6 +113,29 @@ kemi sits between your agent and your storage. It handles:
 | Embedding | fastembed (local) | OpenAI, custom |
 | Storage | SQLite | JSON, custom |
 
+## Integrations
+
+### MCP Server
+Any MCP-compatible agent (Claude, Cursor, Continue) can use kemi as memory:
+```bash
+pip install kemi[mcp]
+python -m kemi.mcp_server
+```
+
+### LangChain
+```python
+from kemi import Memory
+from kemi.integrations.langchain import KemiMemory
+memory = Memory()
+chat_memory = KemiMemory(user_id="alice", memory=memory)
+```
+
+### Export / Import
+```python
+memory.export("backup.json")  # backup all memories
+memory.import_from("backup.json")  # restore from backup
+```
+
 ## Documentation
 
 - [Quickstart](docs/quickstart.md) — get running in 5 minutes

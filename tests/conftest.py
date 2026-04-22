@@ -1,5 +1,5 @@
 import hashlib
-from typing import Optional
+
 
 import pytest
 
@@ -40,7 +40,7 @@ class MockStorageAdapter(StorageAdapter):
         user_id: str,
         query_embedding: list[float],
         top_k: int = 10,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         from kemi.scoring import cosine_similarity
 
@@ -60,7 +60,7 @@ class MockStorageAdapter(StorageAdapter):
         candidates.sort(key=lambda m: m.score, reverse=True)
         return candidates[:top_k]
 
-    def get(self, memory_id: str) -> Optional[MemoryObject]:
+    def get(self, memory_id: str) -> MemoryObject | None:
         return self._store.get(memory_id)
 
     def update(self, memory: MemoryObject) -> None:
@@ -81,7 +81,7 @@ class MockStorageAdapter(StorageAdapter):
     def get_all_by_user(
         self,
         user_id: str,
-        lifecycle_filter: Optional[list[LifecycleState]] = None,
+        lifecycle_filter: list[LifecycleState] | None = None,
     ) -> list[MemoryObject]:
         result = [m for m in self._store.values() if m.user_id == user_id]
         if lifecycle_filter is not None:
@@ -91,8 +91,29 @@ class MockStorageAdapter(StorageAdapter):
     def count(self, user_id: str) -> int:
         return sum(1 for m in self._store.values() if m.user_id == user_id)
 
+    def get_all(self) -> list:
+        return list(self._store.values())
+
+    def get_all_users(self) -> list[str]:
+        return list(set(m.user_id for m in self._store.values()))
+
     def upgrade_schema(self, from_version: int, to_version: int) -> None:
         pass
+
+    def get_by_tag(
+        self,
+        user_id: str,
+        tag: str,
+        lifecycle_filter: list[LifecycleState] | None = None,
+    ) -> list[MemoryObject]:
+        if lifecycle_filter is None:
+            lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
+
+        return [
+            m
+            for m in self._store.values()
+            if m.user_id == user_id and m.lifecycle_state in lifecycle_filter and tag in m.tags
+        ]
 
 
 @pytest.fixture
