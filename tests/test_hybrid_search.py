@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
+
 import pytest
 
+from kemi.models import LifecycleState, MemoryObject, MemorySource
 from kemi.scoring import bm25_score, rank_memories
-from kemi.models import MemoryObject, MemorySource, LifecycleState
-from datetime import datetime, timezone
 
 
 def test_bm25_score_exact_keyword_match() -> None:

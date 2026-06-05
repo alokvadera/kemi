@@ -54,6 +54,12 @@ def transition(memory: MemoryObject, new_state: LifecycleState) -> MemoryObject:
         lifecycle_state=new_state,
         metadata=memory.metadata.copy() if memory.metadata else {},
         embedding_dim=memory.embedding_dim,
+        tags=memory.tags,
+        confidence=memory.confidence,
+        memory_type=memory.memory_type,
+        session_id=memory.session_id,
+        namespace=memory.namespace,
+        version=memory.version,
     )
 
 
@@ -66,8 +72,16 @@ def get_recall_filter() -> list[LifecycleState]:
 
 
 _VALID_TRANSITIONS = {
-    LifecycleState.ACTIVE: {LifecycleState.DECAYING, LifecycleState.DELETED},
-    LifecycleState.DECAYING: {LifecycleState.ACTIVE, LifecycleState.DELETED},
+    LifecycleState.ACTIVE: {
+        LifecycleState.DECAYING,
+        LifecycleState.DELETED,
+        LifecycleState.ARCHIVED,
+    },
+    LifecycleState.DECAYING: {
+        LifecycleState.ACTIVE,
+        LifecycleState.DELETED,
+        LifecycleState.ARCHIVED,
+    },
     LifecycleState.ARCHIVED: set(),
     LifecycleState.DELETED: set(),
 }
@@ -80,10 +94,12 @@ def validate_transition(from_state: LifecycleState, to_state: LifecycleState) ->
     Valid transitions:
     - ACTIVE → DECAYING
     - ACTIVE → DELETED
+    - ACTIVE → ARCHIVED
     - DECAYING → ACTIVE
     - DECAYING → DELETED
+    - DECAYING → ARCHIVED
 
-    Nothing transitions to ARCHIVED in v1.
+    ARCHIVED and DELETED are terminal.
     """
     if to_state not in _VALID_TRANSITIONS.get(from_state, set()):
         raise ValueError(

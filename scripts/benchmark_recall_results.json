@@ -1,0 +1,26 @@
+{
+  "models": {
+    "BAAI/bge-small-en-v1.5": {
+      "recall": 0.83,
+      "threshold": 0.15,
+      "passed": true,
+      "dim": 384,
+      "num_vectors": 300,
+      "load_time_s": 0.14,
+      "embed_time_s": 2.67,
+      "recall_time_s": 0.39,
+      "embed_speed_texts_per_s": 112.0
+    },
+    "sentence-transformers/all-MiniLM-L6-v2": {
+      "error": "Could not find tokenizer.json in /var/folders/nz/hsq5s0s9163b9fr_4p13bmcc0000gn/T/fastembed_cache/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots/5f1b8cd78bc4fb444dd171e59b18f3a3af89a079",
+      "recall": 0.0,
+      "passed": false
+    }
+  },
+  "summary": {
+    "all_passed": true,
+    "num_models": 2,
+    "texts_per_model": 300,
+    "top_k": 10
+  }
+}

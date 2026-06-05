@@ -1,4 +1,6 @@
 import sys
+from typing import Any
+
 from kemi.adapters.base import EmbeddingAdapter
 
 
@@ -15,11 +17,11 @@ class FastEmbedAdapter(EmbeddingAdapter):
 
     _download_message_shown = False
 
-    def __init__(self, model_name: str | None = None):
+    def __init__(self, model_name: str | None = None) -> None:
         self._model_name = model_name or self.MODEL_NAME
-        self._model = None
+        self._model: Any = None
 
-    def _get_model(self):
+    def _get_model(self) -> Any:
         if self._model is None:
             if not FastEmbedAdapter._download_message_shown:
                 print(

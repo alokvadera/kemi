@@ -1,6 +1,5 @@
 import hashlib
 
-
 import pytest
 
 from kemi import Memory
@@ -41,6 +40,8 @@ class MockStorageAdapter(StorageAdapter):
         query_embedding: list[float],
         top_k: int = 10,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
     ) -> list[MemoryObject]:
         from kemi.scoring import cosine_similarity
 
@@ -50,7 +51,10 @@ class MockStorageAdapter(StorageAdapter):
         candidates = [
             m
             for m in self._store.values()
-            if m.user_id == user_id and m.lifecycle_state in lifecycle_filter
+            if m.user_id == user_id
+            and m.lifecycle_state in lifecycle_filter
+            and m.namespace == namespace
+            and (session_id is None or m.session_id in (session_id, None))
         ]
 
         for m in candidates:
@@ -82,17 +86,40 @@ class MockStorageAdapter(StorageAdapter):
         self,
         user_id: str,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[MemoryObject]:
-        result = [m for m in self._store.values() if m.user_id == user_id]
+        result = [
+            m
+            for m in self._store.values()
+            if m.user_id == user_id
+            and m.namespace == namespace
+            and (session_id is None or m.session_id in (session_id, None))
+        ]
         if lifecycle_filter is not None:
             result = [m for m in result if m.lifecycle_state in lifecycle_filter]
+        if offset is not None:
+            result = result[offset:]
+        if limit is not None:
+            result = result[:limit]
         return result
 
     def count(self, user_id: str) -> int:
         return sum(1 for m in self._store.values() if m.user_id == user_id)
 
-    def get_all(self) -> list:
-        return list(self._store.values())
+    def get_all(
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[MemoryObject]:
+        result = list(self._store.values())
+        if offset is not None:
+            result = result[offset:]
+        if limit is not None:
+            result = result[:limit]
+        return result
 
     def get_all_users(self) -> list[str]:
         return list(set(m.user_id for m in self._store.values()))
@@ -105,6 +132,7 @@ class MockStorageAdapter(StorageAdapter):
         user_id: str,
         tag: str,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
     ) -> list[MemoryObject]:
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -112,8 +140,36 @@ class MockStorageAdapter(StorageAdapter):
         return [
             m
             for m in self._store.values()
-            if m.user_id == user_id and m.lifecycle_state in lifecycle_filter and tag in m.tags
+            if m.user_id == user_id
+            and m.lifecycle_state in lifecycle_filter
+            and m.namespace == namespace
+            and tag in m.tags
         ]
+
+    def search_by_content(
+        self,
+        user_id: str,
+        query: str,
+        top_k: int = 10,
+        lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
+    ) -> list[MemoryObject]:
+        # Simple substring match for mock implementation
+        if lifecycle_filter is None:
+            lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
+
+        candidates = [
+            m
+            for m in self._store.values()
+            if m.user_id == user_id
+            and m.lifecycle_state in lifecycle_filter
+            and m.namespace == namespace
+            and query.lower() in m.content.lower()
+            and (session_id is None or m.session_id in (session_id, None))
+        ]
+
+        return candidates[:top_k]
 
 
 @pytest.fixture
@@ -129,3 +185,18 @@ def mock_storage() -> type:
 @pytest.fixture
 def mock_memory(mock_embedding: type, mock_storage: type) -> Memory:
     return Memory(embed=mock_embedding(), store=mock_storage())
+
+
+@pytest.fixture
+def real_db_memory(tmp_path, mock_embedding: type) -> Memory:
+    """Create a Memory instance backed by a real temporary SQLite database.
+
+    This exercises the full CLI-to-storage pipeline including schema creation,
+    SQL INSERT/SELECT operations, and storage adapter implementation.
+    Uses the mock embedding adapter so no external embedding service is needed.
+    """
+    from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
+
+    db_path = str(tmp_path / "test_kemi.db")
+    adapter = SQLiteStorageAdapter(db_path=db_path)
+    return Memory(embed=mock_embedding(), store=adapter)

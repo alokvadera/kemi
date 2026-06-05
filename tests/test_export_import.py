@@ -1,12 +1,11 @@
 import json
 import os
-import tempfile
 
 import pytest
 
-from kemi.adapters.storage.json import JSONStorageAdapter
 from kemi import Memory
 from kemi.adapters.embedding.custom import CustomEmbedAdapter
+from kemi.adapters.storage.json import JSONStorageAdapter
 
 
 def custom_embed(texts: list[str]) -> list[list[float]]:
@@ -43,10 +42,10 @@ class TestExport:
         memory, db_path = memory_with_data
         export_path = db_path.replace("test.json", "export.json")
 
-        count = memory.export(export_path)
+        memory.export(export_path)
 
         assert os.path.exists(export_path)
-        with open(export_path, "r") as f:
+        with open(export_path) as f:
             data = json.load(f)
         assert isinstance(data, list)
 
@@ -64,7 +63,7 @@ class TestExport:
 
         memory.export(export_path)
 
-        with open(export_path, "r") as f:
+        with open(export_path) as f:
             data = json.load(f)
 
         assert len(data) == 3

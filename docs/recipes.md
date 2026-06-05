@@ -162,7 +162,201 @@ print(results[0].content)
 
 This uses Ollama's local embedding model instead of fastembed or OpenAI.
 
-## Recipe 5: LangChain integration
+## Recipe 5: Multi-level recall helpers
+
+kemi provides ergonomic helpers for different *levels* of memory retrieval.
+
+### User profile (semantic facts)
+
+```python
+from kemi import Memory
+from kemi.models import MemoryType
+
+memory = Memory()
+
+# Store long-lived preferences as SEMANTIC memories
+memory.remember("alice", "I am vegetarian", memory_type=MemoryType.SEMANTIC, importance=0.9)
+memory.remember("alice", "I live in Mumbai", memory_type=MemoryType.SEMANTIC, importance=0.8)
+memory.remember("alice", "I prefer short answers", memory_type=MemoryType.SEMANTIC, importance=0.7)
+
+# Retrieve the user's profile — returns SEMANTIC memories sorted by importance
+profile = memory.recall_user_profile("alice", top_k=10)
+for mem in profile:
+    print(f"  {mem.content} (importance: {mem.importance})")
+```
+
+### Session context (episodic events)
+
+```python
+from kemi.models import MemoryType
+
+session_id = "sess_2024_06_05"
+
+# Store session-specific events as EPISODIC memories
+memory.remember("alice", "User asked about Python asyncio", memory_type=MemoryType.EPISODIC, session_id=session_id)
+memory.remember("alice", "User mentioned they use FastAPI", memory_type=MemoryType.EPISODIC, session_id=session_id)
+
+# Retrieve recent session context — returns EPISODIC memories sorted by recency
+context = memory.recall_session_context("alice", session_id, top_k=10)
+for mem in context:
+    print(f"  {mem.content}")
+```
+
+### Agent knowledge (agent-scoped memories)
+
+```python
+from kemi.models import MemoryType
+
+# Store agent-specific rules or knowledge
+memory.remember("alice", "Always greet users by name", memory_type=MemoryType.SEMANTIC, agent_id="support_bot", importance=0.9)
+memory.remember("bob", "Escalate billing issues to tier-2", memory_type=MemoryType.SEMANTIC, agent_id="support_bot", importance=0.8)
+
+# Retrieve all knowledge for a specific agent across all users
+knowledge = memory.recall_agent_knowledge("support_bot", top_k=20)
+for mem in knowledge:
+    print(f"  {mem.content} (user: {mem.user_id})")
+```
+
+## Recipe 6: Procedural memory (how-to workflows)
+
+Use **procedural** memory for reusable step-by-step instructions, SOPs, or
+agent playbooks. It is distinct from *episodic* (past events) and *semantic*
+(facts/preferences).
+
+| Memory type | Use when | Example |
+|-------------|----------|---------|
+| **EPISODIC** | Remembering something that happened | "User asked about Python asyncio" |
+| **SEMANTIC** | Remembering a fact or preference | "User is vegetarian" |
+| **PROCEDURAL** | Remembering a reusable workflow | "How to reset a password" |
+
+### Store a procedure
+
+```python
+from kemi import Memory, remember_procedure
+
+memory = Memory()
+
+remember_procedure(
+    memory,
+    user_id="alice",
+    name="password_reset",
+    steps=[
+        "Ask the user for their registered email address",
+        "Send a one-time reset link to the verified email",
+        "Confirm the reset was initiated and provide ETA",
+    ],
+    metadata={"team": "support", "priority": "high"},
+    importance=0.9,
+)
+```
+
+### Recall a procedure
+
+```python
+from kemi import recall_procedures
+
+results = recall_procedures(
+    memory,
+    "how do I reset a password?",
+    user_id="alice",
+    top_k=3,
+)
+
+for proc in results:
+    print(proc.content)
+```
+
+`recall_procedures` performs a semantic search and returns only memories whose
+`memory_type` is `PROCEDURAL`, so episodic or semantic matches are automatically
+filtered out.
+
+## Recipe 7: Entity-aware retrieval
+
+When a query mentions specific entities (names, dates, places), kemi can boost
+memories that contain the same entities. This is useful when a user asks about
+a specific person, product, or event and you want matching memories to rank
+higher even if their raw semantic similarity is close.
+
+### Enable entity boost
+
+```python
+from kemi import Memory, MemoryConfig
+
+config = MemoryConfig(
+    enable_entity_boost=True,
+    entity_boost_weight=0.15,  # 0.0–1.0; higher = stronger boost
+)
+
+memory = Memory(config=config)
+
+memory.remember("alice", "Alice visited Paris in June 2024")
+memory.remember("alice", "Bob moved to Berlin last year")
+
+# "Alice" and "Paris" are extracted from the query and matched against memory content
+results = memory.recall("alice", "What did Alice do in Paris?")
+# The first memory (which mentions Alice and Paris) is ranked higher
+```
+
+### Custom entity linker
+
+```python
+from kemi import Memory, EntityLinker
+
+class ProductLinker(EntityLinker):
+    def extract(self, text: str) -> set[str]:
+        # Simple regex for product SKUs like PROD-12345
+        import re
+        return set(re.findall(r"PROD-\d+", text))
+
+memory = Memory(entity_linker=ProductLinker())
+```
+
+### spaCy NER entity linker (more accurate)
+
+For production use, swap the default regex linker for spaCy’s trained NER
+pipeline. It recognises people, organisations, locations, dates, products, and
+more with far higher accuracy than regex heuristics.
+
+```bash
+pip install spacy
+python -m spacy download en_core_web_sm
+```
+
+```python
+from kemi import Memory, SpacyEntityLinker
+
+# Use spaCy NER for entity extraction
+memory = Memory(entity_linker=SpacyEntityLinker())
+
+# Or restrict to specific entity types only
+memory = Memory(
+    entity_linker=SpacyEntityLinker(
+        model="en_core_web_sm",
+        allowed_labels={"PERSON", "ORG", "GPE", "PRODUCT"},
+    )
+)
+```
+
+Note: spaCy models are ~10–50 MB and load on first instantiation. Re-use the same
+`SpacyEntityLinker()` across multiple `Memory()` instances or cache it at
+application startup to avoid reloading.
+
+### Inspect entity scores
+
+```python
+explained = memory.recall_explain("alice", "Alice in Paris", top_k=2)
+for item in explained:
+    print(item["memory"].content)
+    print("  entity_score:", item["explanation"]["entity_score"])
+    print("  final_score: ", item["explanation"]["final_score"])
+```
+
+When `enable_entity_boost=True`, `recall_explain` includes `entity_score` and
+an `entity` weight in the explanation dict. The boost is computed as a Jaccard
+overlap between query entities and memory entities, then multiplied by
+`entity_boost_weight` and added to the final score.
+
+## Recipe 8: LangChain integration
 
 ```python
 # pip install kemi[langchain] langchain langchain-openai

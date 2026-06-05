@@ -1,0 +1,53 @@
+{
+  "scales": [
+    1000,
+    5000,
+    10000
+  ],
+  "brute_force": [
+    {
+      "insert_s": 0.024,
+      "query_ms": 54.69
+    },
+    {
+      "insert_s": 0.125,
+      "query_ms": 266.96
+    },
+    {
+      "insert_s": 0.256,
+      "query_ms": 535.78
+    }
+  ],
+  "ann_vec": [
+    {
+      "insert_s": 0.549,
+      "query_ms": 0.95,
+      "type": "real"
+    },
+    {
+      "insert_s": 2.7,
+      "query_ms": 1.66,
+      "type": "synthetic"
+    },
+    {
+      "insert_s": 5.421,
+      "query_ms": 2.61,
+      "type": "synthetic"
+    }
+  ],
+  "recall_at_10": [
+    20.0,
+    100.0,
+    100.0
+  ],
+  "speedup": [
+    57.4,
+    160.9,
+    205.4
+  ],
+  "pure_python_ms": [
+    59.85,
+    298.68,
+    599.07
+  ]
+}

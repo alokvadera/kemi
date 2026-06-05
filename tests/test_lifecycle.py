@@ -78,13 +78,13 @@ def test_transition_invalid() -> None:
         last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
         importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
+        lifecycle_state=LifecycleState.ARCHIVED,
         metadata={},
         embedding_dim=None,
     )
 
     with pytest.raises(ValueError):
-        lifecycle.transition(mem, LifecycleState.ARCHIVED)
+        lifecycle.transition(mem, LifecycleState.ACTIVE)
 
 
 def test_transition_no_mutation() -> None:

@@ -13,4 +13,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
       - run: ruff check src/ tests/
-      - run: pytest --cov=kemi --cov-report=term-missing --cov-fail-under=80
+      - run: mypy src/kemi/ tests/
+      - run: pytest --ignore=tests/test_api_integration.py --cov=kemi --cov-report=term-missing --cov-fail-under=80
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest tests/test_api_integration.py -v
+
+  benchmark-recall:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,vec]"
+      - run: pip install fastembed
+      - run: python scripts/benchmark_recall_models.py

@@ -1,6 +1,6 @@
-import pytest
-
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from kemi import scoring
 from kemi.models import LifecycleState, MemoryObject, MemorySource
@@ -28,7 +28,6 @@ def test_cosine_similarity_opposite_vectors() -> None:
 
 
 def test_temporal_recency_now() -> None:
-    from datetime import datetime
 
     now = datetime.now(timezone.utc)
     result = scoring.temporal_recency(now)
@@ -36,7 +35,6 @@ def test_temporal_recency_now() -> None:
 
 
 def test_temporal_recency_old() -> None:
-    from datetime import datetime, timedelta
 
     old = datetime.now(timezone.utc) - timedelta(hours=1000)
     result = scoring.temporal_recency(old)
@@ -44,7 +42,6 @@ def test_temporal_recency_old() -> None:
 
 
 def test_score_memory_weights() -> None:
-    from datetime import datetime
 
     mem = MemoryObject(
         memory_id="test",
@@ -73,7 +70,6 @@ def test_score_memory_weights() -> None:
 
 
 def test_rank_memories_sorted() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -114,7 +110,6 @@ def test_rank_memories_sorted() -> None:
 
 
 def test_truncate_by_tokens_none() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -138,7 +133,6 @@ def test_truncate_by_tokens_none() -> None:
 
 
 def test_truncate_by_tokens_never_empty() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -167,7 +161,6 @@ def test_cosine_similarity_empty_vectors() -> None:
 
 
 def test_temporal_recency_exact_now() -> None:
-    from datetime import datetime
 
     now = datetime.now(timezone.utc)
     result = scoring.temporal_recency(now, half_life_hours=168.0)
@@ -175,7 +168,6 @@ def test_temporal_recency_exact_now() -> None:
 
 
 def test_score_memory_no_embedding() -> None:
-    from datetime import datetime
 
     mem = MemoryObject(
         memory_id="test",
@@ -196,7 +188,6 @@ def test_score_memory_no_embedding() -> None:
 
 
 def test_score_memory_importance_clamped() -> None:
-    from datetime import datetime
 
     mem = MemoryObject(
         memory_id="test",
@@ -217,7 +208,6 @@ def test_score_memory_importance_clamped() -> None:
 
 
 def test_truncate_by_tokens_with_custom_counter() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -249,7 +239,6 @@ def test_truncate_by_tokens_empty_list() -> None:
 
 
 def test_temporal_recency_negative_hours() -> None:
-    from datetime import datetime, timedelta
 
     future = datetime.now(timezone.utc) - timedelta(hours=-1)
     result = scoring.temporal_recency(future)
@@ -257,7 +246,6 @@ def test_temporal_recency_negative_hours() -> None:
 
 
 def test_truncate_edge_case_single_memory_exceeds_budget() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -280,7 +268,6 @@ def test_truncate_edge_case_single_memory_exceeds_budget() -> None:
 
 
 def test_truncate_stops_when_budget_exceeded() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -317,7 +304,6 @@ def test_truncate_stops_when_budget_exceeded() -> None:
 
 
 def test_mmr_rerank_returns_diverse_results() -> None:
-    from datetime import datetime
 
     similar_emb = [1.0, 0.0] * 32
     diverse_emb = [0.0, 1.0] * 32
@@ -403,7 +389,6 @@ def test_mmr_rerank_returns_diverse_results() -> None:
 
 
 def test_mmr_rerank_top_k_larger_than_memories() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -441,7 +426,6 @@ def test_mmr_rerank_top_k_larger_than_memories() -> None:
 
 
 def test_mmr_rerank_lambda_1_is_pure_relevance() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -535,8 +519,14 @@ def test_bm25_corpus_zero_docs() -> None:
     assert result >= 0.0
 
 
+def test_bm25_corpus_avgdl_zero() -> None:
+    """Corpus with empty strings should not cause division by zero (avgdl=0 → 1.0)."""
+    result = scoring.bm25_score_corpus("query", "doc", [""])
+    assert result >= 0.0
+    assert isinstance(result, float)
+
+
 def test_mmr_rerank_no_embeddings() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(
@@ -574,7 +564,6 @@ def test_mmr_rerank_no_embeddings() -> None:
 
 
 def test_mmr_rerank_top_k_zero() -> None:
-    from datetime import datetime
 
     memories = [
         MemoryObject(

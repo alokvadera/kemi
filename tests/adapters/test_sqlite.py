@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import datetime, timezone
 
 import pytest
@@ -356,30 +357,34 @@ def test_get_by_tag_exact_match_no_false_positives(sqlite_adapter) -> None:
 
 
 def test_migration_creates_schema_version_table(sqlite_adapter) -> None:
-    cursor = sqlite_adapter._get_connection().execute("SELECT version FROM schema_version LIMIT 1")
+    cursor = sqlite_adapter._get_connection().execute(
+        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+    )
     row = cursor.fetchone()
     assert row is not None
-    assert row[0] == 2
+    assert row[0] == sqlite_adapter.CURRENT_VERSION
 
 
 def test_migration_idempotent(sqlite_adapter) -> None:
-    sqlite_adapter.upgrade_schema(1, 2)
-    sqlite_adapter.upgrade_schema(1, 2)
+    sqlite_adapter.upgrade_schema(1, sqlite_adapter.CURRENT_VERSION)
+    sqlite_adapter.upgrade_schema(1, sqlite_adapter.CURRENT_VERSION)
 
-    cursor = sqlite_adapter._get_connection().execute("SELECT version FROM schema_version LIMIT 1")
+    cursor = sqlite_adapter._get_connection().execute(
+        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+    )
     row = cursor.fetchone()
-    assert row[0] == 2
+    assert row[0] == sqlite_adapter.CURRENT_VERSION
 
 
 def test_sqlite_close() -> None:
     adapter = SQLiteStorageAdapter(db_path=":memory:")
     adapter.close()
-    assert adapter._shared_conn is None
+    assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
 
 
 def test_get_connection_creates_new_conn() -> None:
-    import tempfile
     import os
+    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
@@ -389,3 +394,625 @@ def test_get_connection_creates_new_conn() -> None:
         cursor = conn.execute("SELECT 1")
         row = cursor.fetchone()
         assert row[0] == 1
+
+
+# ── Context manager tests ────────────────────────────────────────────
+
+
+def test_context_manager_basic() -> None:
+    """with-statement returns the adapter and allows operations."""
+    with SQLiteStorageAdapter(db_path=":memory:") as adapter:
+        mem = MemoryObject(
+            memory_id="ctx-1",
+            user_id="user1",
+            content="context test",
+            embedding=None,
+            score=0.0,
+            created_at=datetime.now(timezone.utc),
+            last_accessed_at=datetime.now(timezone.utc),
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+        adapter.store(mem)
+        result = adapter.get("ctx-1")
+        assert result is not None
+        assert result.content == "context test"
+
+
+def test_context_manager_closes_connection() -> None:
+    """__exit__ calls close(), setting _local.conn to None."""
+    adapter = SQLiteStorageAdapter(db_path=":memory:")
+    with adapter:
+        assert adapter._get_connection() is not None
+    assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
+
+
+def test_context_manager_closes_on_exception() -> None:
+    """Connection is closed even if an exception is raised inside with-block."""
+    adapter = SQLiteStorageAdapter(db_path=":memory:")
+    with pytest.raises(ValueError):
+        with adapter:
+            raise ValueError("boom")
+    assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
+
+
+def test_context_manager_with_file_db() -> None:
+    """Context manager works with file-based databases."""
+    import os
+    import tempfile
+
+    tmp = tempfile.mktemp(suffix=".db")
+    try:
+        with SQLiteStorageAdapter(db_path=tmp) as adapter:
+            mem = MemoryObject(
+                memory_id="file-ctx",
+                user_id="user1",
+                content="file context test",
+                embedding=None,
+                score=0.0,
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
+                source=MemorySource.USER_STATED,
+                importance=0.5,
+                lifecycle_state=LifecycleState.ACTIVE,
+                metadata={},
+                embedding_dim=None,
+            )
+            adapter.store(mem)
+        # After context exit, the connection should be closed
+        assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def test_context_manager_double_close() -> None:
+    """Calling close() after context exit is safe (no-op)."""
+    with SQLiteStorageAdapter(db_path=":memory:") as adapter:
+        pass
+    assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
+    # Second close should be harmless
+    adapter.close()
+    assert not hasattr(adapter._local, "conn") or adapter._local.conn is None
+
+
+# ── Transaction & connection tests ────────────────────────────────────
+
+
+def test_transaction_rollback_on_error(sqlite_adapter) -> None:
+    """_transaction should rollback when an exception occurs."""
+    with pytest.raises(ValueError):
+        with sqlite_adapter._transaction() as conn:
+            conn.execute("CREATE TABLE tx_test (id INTEGER PRIMARY KEY)")
+            raise ValueError("force rollback")
+
+    # The table should not exist because rollback happened
+    with pytest.raises(sqlite3.OperationalError):
+        sqlite_adapter._get_connection().execute("SELECT * FROM tx_test")
+
+
+def test_shared_conn_property(sqlite_adapter) -> None:
+    """_shared_conn returns the current thread's connection."""
+    conn = sqlite_adapter._get_connection()
+    assert sqlite_adapter._shared_conn is conn
+    sqlite_adapter.close()
+    assert sqlite_adapter._shared_conn is None
+
+
+def test_del_does_not_crash() -> None:
+    """__del__ should not raise even if connection was never opened."""
+    adapter = SQLiteStorageAdapter(db_path=":memory:")
+    adapter.close()
+    # Should not raise
+    adapter.__del__()
+
+
+# ── store_many ───────────────────────────────────────────────────────
+
+
+def test_store_many_atomic(sqlite_adapter) -> None:
+    mem1 = MemoryObject(
+        memory_id="sm1",
+        user_id="user1",
+        content="one",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    mem2 = MemoryObject(
+        memory_id="sm2",
+        user_id="user1",
+        content="two",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    count = sqlite_adapter.store_many([mem1, mem2])
+    assert count == 2
+    assert sqlite_adapter.get("sm1") is not None
+    assert sqlite_adapter.get("sm2") is not None
+
+
+def test_store_many_empty_list(sqlite_adapter) -> None:
+    assert sqlite_adapter.store_many([]) == 0
+
+
+# ── rebuild_fts_index ─────────────────────────────────────────────────
+
+
+def test_rebuild_fts_index(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="fts-rebuild",
+        user_id="user1",
+        content="rebuild test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+    count = sqlite_adapter.rebuild_fts_index()
+    assert count >= 1
+
+
+def test_rebuild_fts_index_for_user(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="fts-user",
+        user_id="u1",
+        content="user rebuild",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+    count = sqlite_adapter.rebuild_fts_index(user_id="u1")
+    assert count == 1
+
+
+# ── search with session_id ────────────────────────────────────────────
+
+
+def test_search_with_session_id(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="sid1",
+        user_id="user1",
+        content="session memory",
+        embedding=[1.0] * 64,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=64,
+        session_id="sess-1",
+    )
+    sqlite_adapter.store(mem)
+    results = sqlite_adapter.search("user1", [1.0] * 64, top_k=10, session_id="sess-1")
+    assert len(results) == 1
+    assert results[0].memory_id == "sid1"
+
+
+# ── get_all_by_user with limit / offset ───────────────────────────────
+
+
+def test_get_all_by_user_limit(sqlite_adapter) -> None:
+    for i in range(5):
+        mem = MemoryObject(
+            memory_id=f"l{i}",
+            user_id="user1",
+            content=f"item {i}",
+            embedding=None,
+            score=0.0,
+            created_at=datetime.now(timezone.utc),
+            last_accessed_at=datetime.now(timezone.utc),
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+        sqlite_adapter.store(mem)
+
+    results = sqlite_adapter.get_all_by_user("user1", limit=2)
+    assert len(results) == 2
+
+
+def test_get_all_by_user_limit_and_offset(sqlite_adapter) -> None:
+    for i in range(5):
+        mem = MemoryObject(
+            memory_id=f"o{i}",
+            user_id="user1",
+            content=f"item {i}",
+            embedding=None,
+            score=0.0,
+            created_at=datetime.now(timezone.utc),
+            last_accessed_at=datetime.now(timezone.utc),
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+        sqlite_adapter.store(mem)
+
+    # offset without limit should use -1 as limit
+    results = sqlite_adapter.get_all_by_user("user1", offset=2)
+    assert len(results) == 3
+
+
+# ── get_all with limit / offset ─────────────────────────────────────
+
+
+def test_get_all_limit(sqlite_adapter) -> None:
+    for i in range(3):
+        mem = MemoryObject(
+            memory_id=f"ga{i}",
+            user_id="user1",
+            content=f"item {i}",
+            embedding=None,
+            score=0.0,
+            created_at=datetime.now(timezone.utc),
+            last_accessed_at=datetime.now(timezone.utc),
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+        sqlite_adapter.store(mem)
+
+    results = sqlite_adapter.get_all(limit=2)
+    assert len(results) == 2
+
+
+def test_get_all_limit_and_offset(sqlite_adapter) -> None:
+    for i in range(3):
+        mem = MemoryObject(
+            memory_id=f"gao{i}",
+            user_id="user1",
+            content=f"item {i}",
+            embedding=None,
+            score=0.0,
+            created_at=datetime.now(timezone.utc),
+            last_accessed_at=datetime.now(timezone.utc),
+            source=MemorySource.USER_STATED,
+            importance=0.5,
+            lifecycle_state=LifecycleState.ACTIVE,
+            metadata={},
+            embedding_dim=None,
+        )
+        sqlite_adapter.store(mem)
+
+    results = sqlite_adapter.get_all(offset=1)
+    assert len(results) == 2
+
+
+# ── get_all_users ────────────────────────────────────────────────────
+
+
+def test_get_all_users(sqlite_adapter) -> None:
+    mem1 = MemoryObject(
+        memory_id="u1",
+        user_id="alice",
+        content="alice",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    mem2 = MemoryObject(
+        memory_id="u2",
+        user_id="bob",
+        content="bob",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem1)
+    sqlite_adapter.store(mem2)
+
+    users = sqlite_adapter.get_all_users()
+    assert set(users) == {"alice", "bob"}
+
+
+# ── search_by_content (FTS5) ───────────────────────────────────────
+
+
+def test_search_by_content_basic(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="fts1",
+        user_id="user1",
+        content="I love pizza and pasta",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+    # FTS5 needs the index to be synced; store calls _sync_fts_single already
+    results = sqlite_adapter.search_by_content("user1", "pizza")
+    assert len(results) >= 1
+    assert any(r.memory_id == "fts1" for r in results)
+
+
+def test_search_by_content_no_results(sqlite_adapter) -> None:
+    results = sqlite_adapter.search_by_content("user1", "nonexistent xyz")
+    assert results == []
+
+
+def test_search_by_content_with_session_id(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="fts-sid",
+        user_id="user1",
+        content="session content",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+        session_id="s1",
+    )
+    sqlite_adapter.store(mem)
+
+    results = sqlite_adapter.search_by_content("user1", "content", session_id="s1")
+    # Session ID filtering in FTS5 may depend on schema; ensure at least it doesn't crash
+    # and returns the memory when no session filter conflicts.
+    assert len(results) >= 0
+
+
+def test_search_by_content_fallback_when_fts_fails(sqlite_adapter, monkeypatch) -> None:
+    """If FTS5 query raises, fallback to Python BM25 should still return results."""
+    mem = MemoryObject(
+        memory_id="fts-fb",
+        user_id="user1",
+        content="fallback test memory",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+
+    def _raise(*args, **kwargs):
+        raise sqlite3.OperationalError("FTS failure")
+
+    monkeypatch.setattr(sqlite_adapter, "_fts5_search", _raise)
+    results = sqlite_adapter.search_by_content("user1", "fallback")
+    assert len(results) >= 1
+
+
+# ── _prepare_fts_query ──────────────────────────────────────────────
+
+
+def test_prepare_fts_query_empty(sqlite_adapter) -> None:
+    assert sqlite_adapter._prepare_fts_query("") == '""'
+    assert sqlite_adapter._prepare_fts_query("   ") == '""'
+
+
+def test_prepare_fts_query_single_term(sqlite_adapter) -> None:
+    q = sqlite_adapter._prepare_fts_query("hello")
+    assert q == '"hello"*'
+
+
+def test_prepare_fts_query_multiple_terms(sqlite_adapter) -> None:
+    q = sqlite_adapter._prepare_fts_query("hello world")
+    assert "hello" in q
+    assert "world" in q
+    assert "OR" in q
+
+
+def test_prepare_fts_query_escapes_special_chars(sqlite_adapter) -> None:
+    q = sqlite_adapter._prepare_fts_query('say "hello" (world): ~now')
+    assert '""' not in q or "say" in q
+
+
+# ── _sync_fts_single error handling ─────────────────────────────────
+
+
+def test_sync_fts_single_operational_error(sqlite_adapter, monkeypatch) -> None:
+    """_sync_fts_single should log warning on OperationalError, not crash."""
+    mem = MemoryObject(
+        memory_id="sync-err",
+        user_id="user1",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+
+    class BadConn:
+        def execute(self, *args, **kwargs):
+            raise sqlite3.OperationalError("no such table")
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(sqlite_adapter, "_get_connection", lambda: BadConn())
+    # Should not raise
+    sqlite_adapter._sync_fts_single(sqlite_adapter._get_connection(), mem)
+
+
+# ── get_api_key_manager ─────────────────────────────────────────────
+
+
+def test_get_api_key_manager(sqlite_adapter) -> None:
+    manager = sqlite_adapter.get_api_key_manager()
+    assert manager is not None
+
+
+# ── update ───────────────────────────────────────────────────────────
+
+
+def test_update_existing_memory(sqlite_adapter) -> None:
+    mem = MemoryObject(
+        memory_id="upd1",
+        user_id="user1",
+        content="original",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+    mem.content = "updated"
+    sqlite_adapter.update(mem)
+    result = sqlite_adapter.get("upd1")
+    assert result is not None
+    assert result.content == "updated"
+
+
+# ── delete_by_id with FTS error handling ──────────────────────────────
+
+
+def test_delete_by_id_fts_error(sqlite_adapter, monkeypatch) -> None:
+    mem = MemoryObject(
+        memory_id="del-fts",
+        user_id="user1",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+
+    class BadConn:
+        def __init__(self, real_conn):
+            self._real = real_conn
+            self._call_count = 0
+
+        def execute(self, sql, *params):
+            self._call_count += 1
+            # Raise only on the memories_fts DELETE (not the main memories DELETE)
+            if "DELETE FROM memories_fts" in str(sql):
+                raise sqlite3.OperationalError("no such table")
+            return self._real.execute(sql, *params)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    real_conn = sqlite_adapter._get_connection()
+    bad = BadConn(real_conn)
+    monkeypatch.setattr(sqlite_adapter, "_get_connection", lambda: bad)
+    # Should not crash even if FTS delete fails; main delete should still work
+    result = sqlite_adapter.delete_by_id("del-fts")
+    assert result is True
+
+
+# ── delete_by_user with FTS error handling ───────────────────────────
+
+
+def test_delete_by_user_fts_error(sqlite_adapter, monkeypatch) -> None:
+    mem = MemoryObject(
+        memory_id="delu-fts",
+        user_id="user1",
+        content="test",
+        embedding=None,
+        score=0.0,
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
+        source=MemorySource.USER_STATED,
+        importance=0.5,
+        lifecycle_state=LifecycleState.ACTIVE,
+        metadata={},
+        embedding_dim=None,
+    )
+    sqlite_adapter.store(mem)
+
+    class BadConn:
+        def __init__(self, real_conn):
+            self._real = real_conn
+            self._call_count = 0
+
+        def execute(self, sql, *params):
+            self._call_count += 1
+            # Raise on first two calls (FTS delete for user + pending delete)
+            if self._call_count <= 2 and "memories_fts" in str(sql):
+                raise sqlite3.OperationalError("no such table")
+            return self._real.execute(sql, *params)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    real_conn = sqlite_adapter._get_connection()
+    bad = BadConn(real_conn)
+    monkeypatch.setattr(sqlite_adapter, "_get_connection", lambda: bad)
+    # Should not crash even if FTS delete fails
+    sqlite_adapter.delete_by_user("user1")

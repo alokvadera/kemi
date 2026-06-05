@@ -67,6 +67,8 @@ class StorageAdapter(ABC):
         query_embedding: list[float],
         top_k: int = 10,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
     ) -> list[MemoryObject]:
         """Search for memories similar to the query embedding.
 
@@ -147,6 +149,10 @@ class StorageAdapter(ABC):
         self,
         user_id: str,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
     ) -> list[MemoryObject]:
         """Get all memories for a user.
 
@@ -158,6 +164,10 @@ class StorageAdapter(ABC):
         Args:
             user_id: The user whose memories to retrieve.
             lifecycle_filter: Only include memories in these states.
+            namespace: Filter by namespace (default: 'default').
+            session_id: Optional session ID filter.
+            limit: Maximum number of memories to return (None for no limit).
+            offset: Number of memories to skip (for pagination).
 
         Returns:
             List of all matching MemoryObjects.
@@ -177,10 +187,18 @@ class StorageAdapter(ABC):
         pass
 
     @abstractmethod
-    def get_all(self) -> list[MemoryObject]:
+    def get_all(
+        self,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> list[MemoryObject]:
         """Get ALL memories from the store.
 
         Used for export/backup.
+
+        Args:
+            limit: Maximum number of memories to return (None for no limit).
+            offset: Number of memories to skip (for pagination).
 
         Returns:
             List of all MemoryObjects in the store.
@@ -216,6 +234,7 @@ class StorageAdapter(ABC):
         user_id: str,
         tag: str,
         lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
     ) -> list[MemoryObject]:
         """Get all memories with a specific tag for a user.
 
@@ -223,8 +242,36 @@ class StorageAdapter(ABC):
             user_id: The user whose memories to search.
             tag: The tag to filter by.
             lifecycle_filter: Only include memories in these states.
+            namespace: Filter by namespace (default: 'default').
 
         Returns:
             List of MemoryObjects with the specified tag.
+        """
+
+    @abstractmethod
+    def search_by_content(
+        self,
+        user_id: str,
+        query: str,
+        top_k: int = 10,
+        lifecycle_filter: list[LifecycleState] | None = None,
+        namespace: str = "default",
+        session_id: str | None = None,
+    ) -> list[MemoryObject]:
+        """Search for memories using keyword matching (no embeddings required).
+
+        This is a fallback search method for when embeddings are not available
+        or when keyword-only search is preferred. Uses BM25-style scoring.
+
+        Args:
+            user_id: The user whose memories to search.
+            query: The search query string.
+            top_k: Maximum number of results to return.
+            lifecycle_filter: Only include memories in these states.
+            namespace: Filter by namespace (default: 'default').
+            session_id: Optional session ID filter.
+
+        Returns:
+            List of MemoryObjects matching the query, sorted by relevance.
         """
         pass

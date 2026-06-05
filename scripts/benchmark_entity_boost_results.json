@@ -1,0 +1,316 @@
+{
+  "config": {
+    "dim": 64,
+    "num_memories": 100,
+    "num_queries": 20,
+    "top_k": 5,
+    "entity_boost_weight": 0.3
+  },
+  "without_boost": {
+    "aggregate": {
+      "hit_rate": 0.3,
+      "mrr": 0.275,
+      "avg_rank": 4.6,
+      "avg_relevant_in_top_k": 0.35
+    },
+    "per_query": [
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q00"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q01"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q02"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q03"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q04"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q05"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 2,
+        "relevant_in_top_k": 2,
+        "query_id": "q06"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q07"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q08"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q09"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q10"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q11"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q12"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q13"
+      },
+      {
+        "hit": true,
+        "mrr": 0.5,
+        "avg_rank": 2,
+        "relevant_in_top_k": 1,
+        "query_id": "q14"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q15"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q16"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q17"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q18"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q19"
+      }
+    ],
+    "total_time_s": 0.119
+  },
+  "with_boost": {
+    "aggregate": {
+      "hit_rate": 0.35,
+      "mrr": 0.35,
+      "avg_rank": 4.35,
+      "avg_relevant_in_top_k": 0.5
+    },
+    "per_query": [
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q00"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q01"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q02"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q03"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q04"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q05"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1.5,
+        "relevant_in_top_k": 2,
+        "query_id": "q06"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q07"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q08"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q09"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q10"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q11"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q12"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q13"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1.5,
+        "relevant_in_top_k": 2,
+        "query_id": "q14"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 1,
+        "relevant_in_top_k": 1,
+        "query_id": "q15"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q16"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q17"
+      },
+      {
+        "hit": true,
+        "mrr": 1.0,
+        "avg_rank": 2,
+        "relevant_in_top_k": 2,
+        "query_id": "q18"
+      },
+      {
+        "hit": false,
+        "mrr": 0.0,
+        "avg_rank": 6,
+        "relevant_in_top_k": 0,
+        "query_id": "q19"
+      }
+    ],
+    "total_time_s": 0.162
+  },
+  "summary": {
+    "hit_rate_improvement_pp": 0.05,
+    "mrr_improvement": 0.075,
+    "avg_rank_improvement": 0.25
+  }
+}

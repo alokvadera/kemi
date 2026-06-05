@@ -1,0 +1,45 @@
+{
+  "config": {
+    "dim": 64,
+    "top_k": 10,
+    "queries_per_scale": 5,
+    "scales": [
+      10,
+      100,
+      500,
+      1000
+    ]
+  },
+  "results": {
+    "batch_total_ms": [
+      3.65,
+      54.61,
+      111.99,
+      169.81
+    ],
+    "stream_total_ms": [
+      17.73,
+      57.79,
+      108.9,
+      171.68
+    ],
+    "stream_ttf_ms": [
+      1.33,
+      3.51,
+      12.82,
+      25.43
+    ],
+    "speedup_total": [
+      0.21,
+      0.94,
+      1.03,
+      0.99
+    ],
+    "results_match": [
+      false,
+      true,
+      true,
+      true
+    ]
+  }
+}

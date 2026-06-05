@@ -55,7 +55,7 @@ class KemiMemory:
         self.query_key = query_key
         self.output_key = output_key
 
-    def save_context(self, inputs: dict, outputs: dict) -> None:
+    def save_context(self, inputs: dict[str, Any], outputs: dict[str, Any]) -> None:
         """Save the human input to kemi memory.
 
         Args:
@@ -69,7 +69,7 @@ class KemiMemory:
                 content=human_input,
             )
 
-    def load_memory_variables(self, inputs: dict) -> dict[str, Any]:
+    def load_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Load relevant context from kemi memory.
 
         Args:

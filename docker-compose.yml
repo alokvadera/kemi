@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: kemi_pgvector
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: kemi_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    health:
+      check: &健康检查
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 5s
+        timeout: 5s
+        retries: 5
+    restart: unless-stopped
+
+  # Optional: Redis for caching (used by kemi[redis])
+  redis:
+    image: redis:7-alpine
+    container_name: kemi_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    health:
+      check:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 5s
+        timeout: 5s
+        retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgvector_data:
+  redis_data:

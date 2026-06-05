@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.4.0] - Unreleased
+### Breaking changes
+- `pip install kemi` now ships **zero hard dependencies** (`chromadb` and
+  `qdrant-client` moved to optional `[chroma]` and `[qdrant]` extras).
+  This is the largest install-size reduction since v0.1.0.
+- Removed `src/kemi/versioning.py` (639 LOC) and the orphan test suite
+  `tests/test_versioning_new.py` (37 tests). These were duplicates of
+  the canonical `src/kemi/versions.py` module and were never imported
+  by production code.
+- Internal: `src/kemi/core.py` was renamed to `src/kemi/_memory_impl.py`
+  to make room for the new `src/kemi/operations/` subpackage. The public
+  `kemi.core.Memory` re-export is preserved, so `from kemi.core import
+  Memory` continues to work. This is invisible to users.
+
+### Added
+- **API stability promise** — see `docs/API_STABILITY.md`. Public
+  classes (`Memory`, `MemoryObject`, `MemoryConfig`, enums) follow a
+  no-breaking-changes-without-deprecation-cycle policy.
+- **CLI `--json` and `--quiet` flags** — every `kemi` subcommand
+  supports machine-readable JSON output (one object per line) and a
+  silent mode that suppresses info output but keeps errors. Default
+  behaviour remains human-readable.
+- **New `kemi.operations` subpackage** — extracted operations from
+  the monolithic `core.py`. Public API unchanged; internal structure
+  is now `Memory` (orchestrator) + free functions in
+  `kemi/operations/_ops_*.py`.
+- **Coverage report configuration** — `pyproject.toml` now documents
+  why optional adapters are excluded (their tests only run when the
+  corresponding dependency is installed). The `92%` badge now clearly
+  refers to the *core path* (SQLite + fastembed), not a global figure.
+- **Honest failure messages** — broad `except Exception` clauses in
+  the core orchestrator now have explanatory comments. Where the
+  catch is unavoidable (storage adapters, external HTTP calls), the
+  rationale is documented inline.
+- **Chunker edge-case tests** — added 7 regression tests for
+  abbreviation handling (Dr., Mr., Prof., e.g.), decimal numbers
+  (3.14), ellipsis (...), and the short-fragment merge logic.
+
+### Fixed
+- **Chunker sentence boundary detection** — `_is_sentence_boundary`
+  now checks if the first word of the previous sentence is an
+  abbreviation, fixing false-positive boundaries after "Dr. Smith",
+  "Mr. Jones", and similar. `split_into_sentences` no longer merges
+  complete short sentences (e.g. "First sentence.") into the next
+  one, only true fragments without terminators.
+- **SQLite migration on legacy databases** — the
+  `idx_memories_expires_at` index is now created in a `try/except`
+  so legacy databases (schema versions 2-6) initialise cleanly
+  instead of crashing with `no such column: expires_at`.
+
 ## [0.3.0] - 2026-04-19
 ### Added
 - CLI — kemi list, recall, forget, export, import, stats commands
