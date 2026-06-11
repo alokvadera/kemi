@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
 
 import pytest
 
-from kemi.models import LifecycleState, MemoryObject, MemorySource
-from kemi.scoring import bm25_score, rank_memories
+from kemi.memory import scoring
+from kemi.memory.scoring import bm25_score, rank_memories
+from tests._helpers.factories import make_memory
 
 
 def test_bm25_score_exact_keyword_match() -> None:
@@ -86,34 +86,24 @@ def test_recall_with_hybrid_search_false(mock_memory) -> None:
 
 def test_hybrid_search_ranks_keyword_higher() -> None:
     """rank_memories with hybrid_search adds keyword boosting."""
-    from kemi.scoring import rank_memories
+    from kemi.memory.scoring import rank_memories
 
     memories = [
-        MemoryObject(
+        make_memory(
             memory_id="1",
             user_id="user1",
             content="pizza is my favorite food",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
-        MemoryObject(
+        make_memory(
             memory_id="2",
             user_id="user1",
             content="random weather content here",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
     ]
 
-    ranked = rank_memories(memories, [0.1] * 64, query="pizza", hybrid_search=True)
+    ranked = rank_memories(memories, [0.1] * 64, query="pizza", config=scoring.ScoreConfig(hybrid_search=True))  # noqa: E501
 
     assert ranked[0].content == "pizza is my favorite food"
 
@@ -121,31 +111,21 @@ def test_hybrid_search_ranks_keyword_higher() -> None:
 def test_rank_memories_with_hybrid(mock_memory) -> None:
     """rank_memories with hybrid_search uses BM25 scoring."""
     memories = [
-        MemoryObject(
+        make_memory(
             memory_id="1",
             user_id="user1",
             content="I love pizza and pasta",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
-        MemoryObject(
+        make_memory(
             memory_id="2",
             user_id="user1",
             content="The weather is nice today",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
     ]
 
-    ranked = rank_memories(memories, [0.1] * 64, query="pizza", hybrid_search=True)
+    ranked = rank_memories(memories, [0.1] * 64, query="pizza", config=scoring.ScoreConfig(hybrid_search=True))  # noqa: E501
 
     assert ranked[0].memory_id == "1"
     assert "pizza" in ranked[0].content.lower()
@@ -154,31 +134,22 @@ def test_rank_memories_with_hybrid(mock_memory) -> None:
 def test_rank_memories_without_hybrid(mock_memory) -> None:
     """rank_memories without hybrid_search uses semantic + recency + importance."""
     memories = [
-        MemoryObject(
+        make_memory(
             memory_id="1",
             user_id="user1",
             content="I love pizza and pasta",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
-        MemoryObject(
+        make_memory(
             memory_id="2",
             user_id="user1",
             content="Random content about something else entirely different",
             embedding=[0.9] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
             importance=0.9,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
     ]
 
-    ranked = rank_memories(memories, [0.1] * 64, query="pizza", hybrid_search=False)
+    ranked = rank_memories(memories, [0.1] * 64, query="pizza", config=scoring.ScoreConfig(hybrid_search=False))  # noqa: E501
 
     assert len(ranked) == 2
 
@@ -186,20 +157,15 @@ def test_rank_memories_without_hybrid(mock_memory) -> None:
 def test_hybrid_search_with_empty_query_uses_semantic(mock_memory) -> None:
     """Hybrid search with empty query falls back to semantic scoring."""
     memories = [
-        MemoryObject(
+        make_memory(
             memory_id="1",
             user_id="user1",
             content="I love pizza and pasta",
             embedding=[0.1] * 64,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
         ),
     ]
 
-    ranked = rank_memories(memories, [0.1] * 64, query="", hybrid_search=True)
+    ranked = rank_memories(memories, [0.1] * 64, query="", config=scoring.ScoreConfig(hybrid_search=True))  # noqa: E501
 
     assert ranked[0].memory_id == "1"
 
@@ -217,7 +183,7 @@ async def test_arecall_with_hybrid_search(mock_memory) -> None:
 
 def test_memory_config_hybrid_search_default() -> None:
     """MemoryConfig has hybrid_search defaulting to True."""
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig()
     assert config.hybrid_search is True

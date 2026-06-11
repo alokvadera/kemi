@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from kemi.adapters.storage.chroma import ChromaStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 
 @pytest.fixture

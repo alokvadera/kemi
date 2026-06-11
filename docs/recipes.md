@@ -170,7 +170,7 @@ kemi provides ergonomic helpers for different *levels* of memory retrieval.
 
 ```python
 from kemi import Memory
-from kemi.models import MemoryType
+from kemi.memory.model import MemoryType
 
 memory = Memory()
 
@@ -188,7 +188,7 @@ for mem in profile:
 ### Session context (episodic events)
 
 ```python
-from kemi.models import MemoryType
+from kemi.memory.model import MemoryType
 
 session_id = "sess_2024_06_05"
 
@@ -205,7 +205,7 @@ for mem in context:
 ### Agent knowledge (agent-scoped memories)
 
 ```python
-from kemi.models import MemoryType
+from kemi.memory.model import MemoryType
 
 # Store agent-specific rules or knowledge
 memory.remember("alice", "Always greet users by name", memory_type=MemoryType.SEMANTIC, agent_id="support_bot", importance=0.9)

@@ -1,0 +1,71 @@
+"""Command-line interface entry point. The CLI implementation lives
+in ``kemi.interfaces.cli.main``; this module re-exports the
+``main`` function for callers that want to invoke the CLI
+programmatically. The ``kemi.interfaces.cli.writer`` submodule holds
+the small stdout/stderr helper used by the CLI.
+"""
+
+from kemi.interfaces.cli.main import (
+    consolidate_memories,
+    decompose_and_recall,
+    explain_memories,
+    export_memories,
+    forget_many_memories,
+    forget_memories,
+    get_memory,
+    graph_memories,
+    import_memories,
+    list_memories,
+    list_users,
+    main,
+    preview_chunk,
+    prune_memories,
+    recall_many_memories,
+    recall_memories,
+    recall_stream_memories,
+    rerank_recall,
+    rollback_memory,
+    show_history,
+    show_stats,
+    show_version_diff,
+    store_memory,
+    topics_memories,
+    update_many_memories,
+    update_memory,
+    webhook_add,
+    webhook_delete,
+    webhook_list,
+)
+
+__all__ = [
+    "main",
+    "get_memory",
+    "list_memories",
+    "store_memory",
+    "recall_memories",
+    "recall_stream_memories",
+    "recall_many_memories",
+    "forget_memories",
+    "forget_many_memories",
+    "update_memory",
+    "update_many_memories",
+    "export_memories",
+    "import_memories",
+    "show_stats",
+    "list_users",
+    "prune_memories",
+    "consolidate_memories",
+    "topics_memories",
+    "graph_memories",
+    "explain_memories",
+    "decompose_and_recall",
+    "rerank_recall",
+    "show_history",
+    "show_version_diff",
+    "rollback_memory",
+    "webhook_add",
+    "webhook_list",
+    "webhook_delete",
+    "preview_chunk",
+]
+

@@ -26,7 +26,8 @@ from datetime import datetime
 from typing import Any
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +35,9 @@ try:
     from qdrant_client import QdrantClient as _QdrantClient
     from qdrant_client.http import models as qmodels
 
-    _QDRANT_AVAILABLE = True
+    _qdrant_available = True
 except ImportError:  # pragma: no cover
-    _QDRANT_AVAILABLE = False
+    _qdrant_available = False
 
 _QDRANT_ERR = (
     "qdrant-client>=1.9.0 is required for QdrantStorageAdapter. "
@@ -82,8 +83,8 @@ class QdrantStorageAdapter(StorageAdapter):
         prefer_grpc: bool = False,
         api_key: str | None = None,
     ) -> None:
-        if not _QDRANT_AVAILABLE:
-            raise ImportError(_QDRANT_ERR)
+        if not _qdrant_available:
+            raise ConfigurationError(_QDRANT_ERR)
 
         self._collection_name = collection_name
         self._embedding_dim = embedding_dim
@@ -548,9 +549,14 @@ class QdrantStorageAdapter(StorageAdapter):
 
     # ── Schema ──────────────────────────────────────────────────────────
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        from_v = from_version if from_version is not None else 1
+        to_v = to_version if to_version is not None else 1
         logger.info(
             "Qdrant schema upgrade from v%d to v%d is a no-op (schema managed by Qdrant)",
-            from_version,
-            to_version,
+            from_v,
+            to_v,
         )
+        return to_v

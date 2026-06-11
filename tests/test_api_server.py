@@ -1,16 +1,34 @@
 """Tests for src/kemi/api_server.py"""
 
-from unittest.mock import MagicMock
+import os
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kemi.models import LifecycleState, MemoryType
+from kemi.memory.model import LifecycleState, MemoryType
 
 # Skip entire module if fastapi is not available
 try:
+    from fastapi import HTTPException
     from fastapi.testclient import TestClient
+    from pydantic import ValidationError
 
-    from kemi.api_server import create_app
+    from kemi.interfaces.api import (
+        AuditQueryRequest,
+        BatchRememberRequest,
+        ConsolidateRequest,
+        CreateAPIKeyRequest,
+        PruneRequest,
+        RateLimiter,
+        RecallRequest,
+        RememberRequest,
+        UpdateRequest,
+        _require_admin,
+        _reset_api_key_manager,
+        _resolve_user_id,
+        create_app,
+    )
 
     _FASTAPI_AVAILABLE = True
 except ImportError:
@@ -21,7 +39,10 @@ except ImportError:
     create_app = None  # type: ignore[assignment, misc]
 
 # Apply skip to all tests in this module if fastapi unavailable
-pytestmark = pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="fastapi not installed")
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="fastapi not installed"),
+]
 
 
 class MockMemory:
@@ -210,10 +231,34 @@ class MockMemory:
             )
             self._audit_trail.export = MagicMock(return_value=[])
 
+    def configure_versioning(self):
+        pass
+
+    def get_history(self, memory_id, limit=100):
+        snap = MagicMock()
+        snap.version = 1
+        snap.content = "original content"
+        snap.importance = 0.5
+        snap.tags = []
+        snap.memory_type = "episodic"
+        snap.confidence = 1.0
+        snap.namespace = "default"
+        snap.source = "user_stated"
+        snap.changed_at = datetime.now()
+        snap.changed_by = "alice"
+        return [snap]
+
 
 @pytest.fixture
 def mock_memory():
     return MockMemory()
+
+
+@pytest.fixture(autouse=True)
+def reset_api_key_manager_after_each():
+    """Reset the cached API key manager after every test to avoid cross-test contamination."""
+    yield
+    _reset_api_key_manager()
 
 
 @pytest.fixture
@@ -358,7 +403,7 @@ class TestRecall:
 
         # Parse SSE events from the response
         events = response.text.strip().split("\n\n")
-        data_events = [e for e in events if e and not e.startswith("event: done") and not e.startswith("event: error")]
+        data_events = [e for e in events if e and not e.startswith("event: done") and not e.startswith("event: error")]  # noqa: E501
         done_events = [e for e in events if e.startswith("event: done")]
 
         # Should have data events + 1 done event
@@ -822,3 +867,638 @@ class TestAdminFeatures:
         assert response.status_code == 200
         data = response.json()
         assert data["audit_trail_enabled"] is False
+
+
+class TestRateLimiter:
+    def test_is_allowed_under_limit(self) -> None:
+        rl = RateLimiter(requests_per_window=3, window_seconds=60)
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user2") is True
+
+    def test_is_allowed_at_limit(self) -> None:
+        rl = RateLimiter(requests_per_window=2, window_seconds=60)
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is False
+
+    def test_is_allowed_window_slides(self, monkeypatch) -> None:
+        import time
+        rl = RateLimiter(requests_per_window=1, window_seconds=60)
+        assert rl.is_allowed("user1") is True
+        # Artificially advance time past the window
+        original_time = time.time
+        monkeypatch.setattr(time, "time", lambda: original_time() + 120)
+        assert rl.is_allowed("user1") is True
+
+    def test_get_retry_after_when_allowed(self) -> None:
+        rl = RateLimiter(requests_per_window=3, window_seconds=60)
+        rl.is_allowed("user1")
+        assert rl.get_retry_after("user1") == 0
+
+    def test_get_retry_after_when_limited(self) -> None:
+        rl = RateLimiter(requests_per_window=1, window_seconds=60)
+        rl.is_allowed("user1")
+        retry = rl.get_retry_after("user1")
+        assert retry > 0
+        assert retry <= 60
+
+    def test_get_retry_after_different_keys(self) -> None:
+        rl = RateLimiter(requests_per_window=1, window_seconds=60)
+        rl.is_allowed("user1")
+        assert rl.get_retry_after("user2") == 0
+
+    def test_multiple_keys_independent(self) -> None:
+        rl = RateLimiter(requests_per_window=2, window_seconds=60)
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is True
+        assert rl.is_allowed("user1") is False
+        assert rl.is_allowed("user2") is True
+        assert rl.is_allowed("user2") is True
+        assert rl.is_allowed("user2") is False
+
+
+class TestRequestModels:
+    def test_remember_request_valid(self) -> None:
+        req = RememberRequest(user_id="alice", content="hello")
+        assert req.user_id == "alice"
+        assert req.content == "hello"
+        assert req.importance == 0.5
+        assert req.namespace == "default"
+
+    def test_remember_request_invalid_empty_user_id(self) -> None:
+        with pytest.raises(ValidationError):
+            RememberRequest(user_id="", content="hello")
+
+    def test_remember_request_invalid_empty_content(self) -> None:
+        with pytest.raises(ValidationError):
+            RememberRequest(user_id="alice", content="")
+
+    def test_remember_request_importance_out_of_range(self) -> None:
+        with pytest.raises(ValidationError):
+            RememberRequest(user_id="alice", content="hello", importance=1.5)
+        with pytest.raises(ValidationError):
+            RememberRequest(user_id="alice", content="hello", importance=-0.1)
+
+    def test_recall_request_valid(self) -> None:
+        req = RecallRequest(user_id="alice", query="python")
+        assert req.top_k == 5
+        assert req.namespace == "default"
+
+    def test_recall_request_invalid_empty_query(self) -> None:
+        with pytest.raises(ValidationError):
+            RecallRequest(user_id="alice", query="")
+
+    def test_update_request_valid_empty(self) -> None:
+        req = UpdateRequest()
+        assert req.content is None
+
+    def test_update_request_importance_out_of_range(self) -> None:
+        with pytest.raises(ValidationError):
+            UpdateRequest(importance=1.5)
+
+    def test_prune_request_valid(self) -> None:
+        req = PruneRequest(namespace="work")
+        assert req.max_age_days is None
+
+    def test_consolidate_request_valid(self) -> None:
+        req = ConsolidateRequest(min_memories=10)
+        assert req.max_age_days == 30.0
+
+    def test_batch_remember_request_valid(self) -> None:
+        req = BatchRememberRequest(user_id="alice", contents=["a", "b"])
+        assert len(req.contents) == 2
+
+    def test_batch_remember_request_empty_contents(self) -> None:
+        with pytest.raises(ValidationError):
+            BatchRememberRequest(user_id="alice", contents=[])
+
+    def test_create_api_key_request_valid(self) -> None:
+        req = CreateAPIKeyRequest(user_id="alice", name="my-key")
+        assert req.expires_in_days is None
+
+    def test_create_api_key_request_name_too_long(self) -> None:
+        with pytest.raises(ValidationError):
+            CreateAPIKeyRequest(user_id="alice", name="x" * 201)
+
+    def test_audit_query_request_limit_bounds(self) -> None:
+        with pytest.raises(ValidationError):
+            AuditQueryRequest(limit=0)
+        with pytest.raises(ValidationError):
+            AuditQueryRequest(limit=10001)
+
+
+class TestAuthMiddleware:
+    def test_no_api_key_required_by_default(self, client) -> None:
+        response = client.post("/remember", json={"user_id": "alice", "content": "test"})
+        assert response.status_code == 200
+
+    def test_api_key_required_missing_key(self, client) -> None:
+        _reset_api_key_manager()
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            response = client.post("/remember", json={"user_id": "alice", "content": "test"})
+            assert response.status_code == 401
+            assert "X-API-Key header required" in response.json()["detail"]
+
+    def test_exempt_path_no_key(self, client) -> None:
+        _reset_api_key_manager()
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            response = client.get("/health")
+            assert response.status_code == 200
+
+    def test_exempt_api_keys_post_no_key(self, client) -> None:
+        _reset_api_key_manager()
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            with patch("kemi.interfaces.api.app._get_api_key_manager", return_value=None):
+                response = client.post("/api/keys", json={"user_id": "alice", "name": "test"})
+                assert response.status_code == 501
+
+    def test_api_key_valid(self, client) -> None:
+        _reset_api_key_manager()
+        manager = MagicMock()
+        key = MagicMock()
+        key.user_id = "alice"
+        manager.lookup.return_value = key
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            with patch("kemi.interfaces.api.app._get_api_key_manager", return_value=manager):
+                response = client.post(
+                    "/remember",
+                    json={"user_id": "alice", "content": "test"},
+                    headers={"X-API-Key": "valid-key"},
+                )
+                assert response.status_code == 200
+
+    def test_api_key_invalid(self, client) -> None:
+        _reset_api_key_manager()
+        manager = MagicMock()
+        manager.lookup.return_value = None
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            with patch("kemi.interfaces.api.app._get_api_key_manager", return_value=manager):
+                response = client.post(
+                    "/remember",
+                    json={"user_id": "alice", "content": "test"},
+                    headers={"X-API-Key": "invalid-key"},
+                )
+                assert response.status_code == 401
+                assert "Invalid or expired API key" in response.json()["detail"]
+
+    def test_resolve_user_id_no_auth(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = None
+        assert _resolve_user_id(request, "alice") == "alice"
+
+    def test_resolve_user_id_with_auth_match(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = "alice"
+        assert _resolve_user_id(request, "alice") == "alice"
+        assert _resolve_user_id(request, None) == "alice"
+
+    def test_resolve_user_id_with_auth_mismatch(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = "alice"
+        with pytest.raises(HTTPException) as exc:
+            _resolve_user_id(request, "bob")
+        assert exc.value.status_code == 403
+
+    def test_resolve_user_id_no_auth_no_user_id(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = None
+        with pytest.raises(HTTPException) as exc:
+            _resolve_user_id(request, None)
+        assert exc.value.status_code == 400
+
+    def test_require_admin_authed(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = "alice"
+        assert _require_admin(request) == "alice"
+
+    def test_require_admin_unauthed(self) -> None:
+        from fastapi import Request
+
+        request = MagicMock(spec=Request)
+        request.state.user_id = None
+        with pytest.raises(HTTPException) as exc:
+            _require_admin(request)
+        assert exc.value.status_code == 401
+
+
+class TestRateLimiting:
+    @pytest.fixture
+    def rate_limited_client(self, mock_memory):
+        with patch.dict(os.environ, {
+            "KEMI_RATE_LIMIT_ENABLED": "true",
+            "KEMI_RATE_LIMIT_REQUESTS": "2",
+            "KEMI_RATE_LIMIT_WINDOW": "60",
+        }):
+            with patch("kemi.interfaces.api.app._rate_limiter", None):
+                app = create_app(memory=mock_memory)
+                with TestClient(app) as client:
+                    yield client
+
+    def test_rate_limit_not_exceeded(self, rate_limited_client) -> None:
+        response = rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test"})  # noqa: E501
+        assert response.status_code == 200
+
+    def test_rate_limit_exceeded(self, rate_limited_client) -> None:
+        rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test1"})
+        rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test2"})
+        response = rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test3"})  # noqa: E501
+        assert response.status_code == 429
+        assert "Retry-After" in response.headers
+
+    def test_rate_limit_different_users_independent(self, rate_limited_client) -> None:
+        rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test1"})
+        rate_limited_client.post("/remember", json={"user_id": "alice", "content": "test2"})
+        response = rate_limited_client.post("/remember", json={"user_id": "bob", "content": "test"})
+        assert response.status_code == 200
+
+
+class TestAdminEndpoints:
+    @pytest.fixture(autouse=True)
+    def _patch_require_admin(self):
+        with patch("kemi.interfaces.api.app._require_admin", return_value="admin"):
+            yield
+
+    def test_admin_fts_rebuild(self, mock_memory) -> None:
+        mock_memory._store.rebuild_fts_index = MagicMock(return_value=42)
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.post("/admin/fts/rebuild")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "completed"
+            assert data["memories_indexed"] == 42
+
+    def test_admin_fts_rebuild_not_supported(self, mock_memory) -> None:
+        class NoFTSStore:
+            pass
+
+        mock_memory._store = NoFTSStore()
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.post("/admin/fts/rebuild")
+            assert response.status_code == 501
+
+    def test_admin_fts_stats(self, mock_memory) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.side_effect = [(100,), (50,), (50,)]
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory._store._get_connection = MagicMock(return_value=mock_conn)
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.get("/admin/fts/stats")
+            assert response.status_code == 200
+            data = response.json()
+            assert "fts_total_entries" in data
+
+    def test_admin_fts_stats_with_user_id(self, mock_memory) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.side_effect = [(100,), (50,), (50,), (50,)]
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory._store._get_connection = MagicMock(return_value=mock_conn)
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.get("/admin/fts/stats?user_id=alice")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["user_id"] == "alice"
+
+    def test_admin_fts_verify(self, mock_memory) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.side_effect = [
+            [("mem-1",), ("mem-2",)],
+            [("mem-1",), ("mem-2",)],
+        ]
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory._store._get_connection = MagicMock(return_value=mock_conn)
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.post("/admin/fts/verify", json={"verify_only": True})
+            assert response.status_code == 200
+            data = response.json()
+            assert data["in_sync"] is True
+
+    def test_admin_fts_verify_repair(self, mock_memory) -> None:
+        mock_cursor = MagicMock()
+        mock_cursor.fetchall.side_effect = [
+            [("mem-1",), ("mem-2",)],
+            [("mem-1",)],
+        ]
+        mock_conn = MagicMock()
+        mock_conn.execute.return_value = mock_cursor
+        mock_memory._store._get_connection = MagicMock(return_value=mock_conn)
+        with patch("kemi.interfaces.api.app._get_memory_singleton", return_value=mock_memory):
+            app = create_app(memory=mock_memory)
+            client = TestClient(app)
+            response = client.post("/admin/fts/verify", json={"verify_only": False})
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "repaired"
+            assert data["auto_repaired"] is True
+            assert data["missing_from_fts"] == 1
+            assert data["orphaned_in_fts"] == 0
+
+    def test_admin_health(self, client) -> None:
+        response = client.get("/admin/health")
+        assert response.status_code == 200
+        data = response.json()
+        assert "status" in data
+        assert "components" in data
+        assert "timestamp" in data
+        assert "database" in data["components"]
+
+    def test_admin_users(self, client) -> None:
+        response = client.get("/admin/users")
+        assert response.status_code == 200
+        data = response.json()
+        assert "users" in data
+        assert "count" in data
+
+
+class TestWebhookEndpoints:
+    @pytest.fixture
+    def webhook_client(self, mock_memory):
+        mock_event_type = MagicMock()
+        mock_event_type.value = "remember"
+        mock_event_class = MagicMock()
+        mock_event_class.from_string.return_value = mock_event_type
+
+        mock_store_class = MagicMock()
+        mock_store_instance = MagicMock()
+        cfg = MagicMock()
+        cfg.webhook_id = "wh-1"
+        cfg.url = "https://example.com/webhook"
+        cfg.events = [mock_event_type]
+        cfg.active = True
+        mock_store_instance.create = MagicMock(return_value="wh-1")
+        mock_store_instance.list_all = MagicMock(return_value=[cfg])
+        mock_store_instance.delete = MagicMock(return_value=True)
+        mock_store_class.return_value = mock_store_instance
+
+        with patch("kemi.interfaces.api.app.WebhookStore", mock_store_class):
+            with patch("kemi.interfaces.api.app.WebhookEventType", mock_event_class):
+                app = create_app(memory=mock_memory)
+                with TestClient(app) as client:
+                    yield client
+
+    def test_create_webhook(self, webhook_client) -> None:
+        response = webhook_client.post("/webhooks", json={
+            "url": "https://example.com/webhook",
+            "events": ["remember"],
+            "secret": "my-secret",
+            "active": True,
+        })
+        assert response.status_code == 201
+        data = response.json()
+        assert data["webhook_id"] == "wh-1"
+
+    def test_create_webhook_invalid_event(self, webhook_client) -> None:
+        with patch("kemi.interfaces.api.app.WebhookEventType.from_string", side_effect=ValueError("invalid")):  # noqa: E501
+            response = webhook_client.post("/webhooks", json={
+                "url": "https://example.com/webhook",
+                "events": ["invalid_event"],
+            })
+            assert response.status_code == 400
+
+    def test_list_webhooks(self, webhook_client) -> None:
+        response = webhook_client.get("/webhooks")
+        assert response.status_code == 200
+        data = response.json()
+        assert "webhooks" in data
+        assert data["count"] == 1
+
+    def test_delete_webhook(self, webhook_client) -> None:
+        response = webhook_client.delete("/webhooks/wh-1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
+
+    def test_delete_webhook_not_found(self, webhook_client) -> None:
+        mock_store_class = MagicMock()
+        mock_store_instance = MagicMock()
+        mock_store_instance.delete = MagicMock(return_value=False)
+        mock_store_class.return_value = mock_store_instance
+        mock_event_class = MagicMock()
+        with patch("kemi.interfaces.api.app.WebhookStore", mock_store_class):
+            with patch("kemi.interfaces.api.app.WebhookEventType", mock_event_class):
+                response = webhook_client.delete("/webhooks/wh-999")
+                assert response.status_code == 404
+
+
+class TestAPIKeyEndpoints:
+    @pytest.fixture
+    def api_key_client(self, mock_memory):
+        manager = MagicMock()
+        key = MagicMock()
+        key.user_id = "alice"
+        key.key_id = "key-1"
+        key.name = "test-key"
+        key.to_dict = MagicMock(return_value={
+            "key_id": "key-1",
+            "user_id": "alice",
+            "name": "test-key",
+            "secret": "secret-123",
+        })
+        manager.lookup = MagicMock(return_value=key)
+        manager.create_key = MagicMock(return_value=key)
+        manager.list_keys = MagicMock(return_value=[key])
+        manager.get = MagicMock(return_value=key)
+        manager.revoke = MagicMock(return_value=True)
+
+        with patch("kemi.interfaces.api.app._get_api_key_manager", return_value=manager):
+            app = create_app(memory=mock_memory)
+            with TestClient(app) as client:
+                yield client
+
+    def test_create_api_key(self, api_key_client) -> None:
+        response = api_key_client.post("/api/keys", json={
+            "user_id": "alice",
+            "name": "my-key",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert data["key_id"] == "key-1"
+        assert data["secret"] == "secret-123"
+
+    def test_create_api_key_mismatched_user_id(self, api_key_client) -> None:
+        with patch("kemi.interfaces.api.app._api_key_required", return_value=True):
+            response = api_key_client.post(
+                "/api/keys",
+                json={"user_id": "bob", "name": "my-key"},
+                headers={"X-API-Key": "valid-key"},
+            )
+            assert response.status_code == 403
+
+    def test_list_api_keys(self, api_key_client) -> None:
+        response = api_key_client.get("/api/keys")
+        assert response.status_code == 200
+        data = response.json()
+        assert "keys" in data
+        assert data["count"] == 1
+
+    def test_revoke_api_key(self, api_key_client) -> None:
+        response = api_key_client.delete("/api/keys/key-1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["revoked"] is True
+
+    def test_revoke_api_key_not_found(self, api_key_client) -> None:
+        with patch("kemi.interfaces.api.app._get_api_key_manager") as mock_mgr:
+            mock_mgr.return_value.revoke.return_value = False
+            response = api_key_client.delete("/api/keys/key-999")
+            assert response.status_code == 404
+
+
+class TestBackgroundTaskEndpoints:
+    @pytest.fixture
+    def task_client(self, mock_memory):
+        mock_task_manager = MagicMock()
+        mock_task_manager.submit_embed_batch.return_value = "task-123"
+        mock_task_manager.submit_rebuild_fts_index.return_value = "task-456"
+        mock_task_manager.get_task_status.return_value = MagicMock(
+            to_dict=lambda: {
+                "task_id": "task-123",
+                "status": "pending",
+                "progress": 0.0,
+            }
+        )
+        mock_task_manager.get_stats.return_value = {
+            "total_tasks": 0,
+            "pending": 0,
+            "running": 0,
+            "completed": 0,
+            "failed": 0,
+            "max_concurrent": 3,
+        }
+        mock_task_manager.cancel_task.return_value = True
+
+        # Pre-configure mixed-status tasks for the filter test
+        pending_task = MagicMock()
+        pending_task.to_dict.return_value = {"task_id": "t1", "status": "pending", "progress": 0.0}
+        running_task = MagicMock()
+        running_task.to_dict.return_value = {"task_id": "t2", "status": "running", "progress": 0.5}
+
+        def _filter_tasks(status=None, limit=50):
+            all_tasks = [pending_task, running_task]
+            if status is None:
+                return all_tasks
+            return [t for t in all_tasks if t.to_dict()["status"] == status.value]
+
+        mock_task_manager.list_tasks.side_effect = _filter_tasks
+
+        with patch("kemi.infra.background_tasks.get_task_manager", return_value=mock_task_manager):
+            app = create_app(memory=mock_memory)
+            with TestClient(app) as client:
+                yield client
+
+    def test_submit_embed_batch(self, task_client) -> None:
+        response = task_client.post("/tasks/embed-batch", json={
+            "user_id": "alice",
+            "contents": ["hello", "world"],
+            "importance": 0.5,
+            "namespace": "default",
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert "task_id" in data
+        assert data["status"] == "pending"
+
+    def test_submit_rebuild_fts(self, task_client) -> None:
+        response = task_client.post("/tasks/rebuild-fts", json={"user_id": "alice"})
+        assert response.status_code == 200
+        data = response.json()
+        assert "task_id" in data
+        assert data["status"] == "pending"
+
+    def test_submit_rebuild_fts_no_user_id(self, task_client) -> None:
+        response = task_client.post("/tasks/rebuild-fts", json={})
+        assert response.status_code == 200
+        data = response.json()
+        assert "task_id" in data
+
+    def test_get_task_status(self, task_client) -> None:
+        response = task_client.get("/tasks/task-123")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["task_id"] == "task-123"
+
+    def test_get_task_status_not_found(self, task_client) -> None:
+        mock_mgr = MagicMock()
+        mock_mgr.get_task_status.return_value = None
+        with patch("kemi.infra.background_tasks.get_task_manager", return_value=mock_mgr):
+            response = task_client.get("/tasks/nonexistent-id")
+            assert response.status_code == 404
+
+    def test_list_tasks(self, task_client) -> None:
+        response = task_client.get("/tasks")
+        assert response.status_code == 200
+        data = response.json()
+        assert "tasks" in data
+        assert "stats" in data
+
+    def test_list_tasks_with_status_filter(self, task_client) -> None:
+        response = task_client.get("/tasks?status=pending")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["status"] == "pending"
+
+    def test_list_tasks_invalid_status(self, task_client) -> None:
+        response = task_client.get("/tasks?status=invalid")
+        assert response.status_code == 400
+
+    def test_cancel_task(self, task_client) -> None:
+        response = task_client.delete("/tasks/task-123")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cancelled"] is True
+
+    def test_cancel_task_not_found(self, task_client) -> None:
+        mock_mgr = MagicMock()
+        mock_mgr.cancel_task.return_value = False
+        with patch("kemi.infra.background_tasks.get_task_manager", return_value=mock_mgr):
+            response = task_client.delete("/tasks/nonexistent-id")
+            assert response.status_code == 400
+
+    def test_get_task_stats(self, task_client) -> None:
+        response = task_client.get("/tasks/stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert "total_tasks" in data
+        assert "pending" in data
+        assert "running" in data
+
+
+class TestMemoryHistory:
+    def test_memory_history(self, client) -> None:
+        response = client.get("/memories/mem-123/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_id"] == "mem-123"
+        assert "versions" in data
+        assert data["count"] >= 0
+
+    def test_memory_history_with_limit(self, client) -> None:
+        response = client.get("/memories/mem-123/history?limit=10")
+        assert response.status_code == 200
+        data = response.json()
+        assert "versions" in data

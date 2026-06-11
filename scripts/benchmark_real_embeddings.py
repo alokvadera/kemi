@@ -15,12 +15,13 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 DIM = 384
 SCALES = [1000, 5000, 10000]
@@ -28,7 +29,7 @@ TOP_K = 10
 QUERIES_PER_SCALE = 10
 
 
-def make_memory(memory_id: str, user_id: str, embedding: list[float]):
+def make_memory(memory_id: str, user_id: str, embedding: list[float]) -> MemoryObject:
     return MemoryObject(
         memory_id=memory_id,
         user_id=user_id,
@@ -60,10 +61,13 @@ def brute_force_ground_truth(embeddings: list[list[float]], query: list[float],
     return {f"mem-{idx}" for _, idx in scores[:top_k]}
 
 
-def benchmark_adapter(adapter_cls, embeddings: list[list[float]],
-                      query_embs: list[list[float]]):
+def benchmark_adapter(
+    adapter_cls: type[SQLiteStorageAdapter] | type[SQLiteVecStorageAdapter],
+    embeddings: list[list[float]],
+    query_embs: list[list[float]],
+) -> tuple[float, list[float], list[float]]:
     """Benchmark insert + query for one adapter at one scale."""
-    adapter_args = {"db_path": ":memory:"}
+    adapter_args: dict[str, Any] = {"db_path": ":memory:"}
     if issubclass(adapter_cls, SQLiteVecStorageAdapter):
         adapter_args["embedding_dim"] = DIM
     adapter = adapter_cls(**adapter_args)
@@ -104,7 +108,7 @@ def benchmark_adapter(adapter_cls, embeddings: list[list[float]],
     return insert_time, query_times, recalls
 
 
-def main():
+def main() -> None:
     if not _SQLITE_VEC_AVAILABLE:
         print("ERROR: sqlite-vec must be installed.")
         sys.exit(1)
@@ -139,8 +143,8 @@ def main():
     for scale in SCALES:
         scale_str = str(scale)
         if scale == 1000:
-            embeddings = real_embs[:scale]
-            query_embs = real_queries
+            embeddings: list[list[float]] = real_embs[:scale]
+            query_embs: list[list[float]] = real_queries
             label = "real"
         else:
             embeddings = synthetic[scale_str]
@@ -233,7 +237,7 @@ def main():
         x = np.arange(len(scales_str))
         width = 0.3
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
 
         # Left: Query latency
         b_ms = [r["query_ms"] for r in results["brute_force"]]

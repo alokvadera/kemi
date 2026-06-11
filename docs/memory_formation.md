@@ -4,7 +4,7 @@ Turn raw conversation histories into structured, persistent memories.
 
 ## Overview
 
-`kemi.memory_formation` provides a pluggable pipeline that:
+`kemi.memory.formation` provides a pluggable pipeline that:
 
 1. **Extracts** atomic facts and events from a conversation using an LLM or heuristic extractor.
 2. **Embeds** candidate memories in batch for efficiency.
@@ -15,7 +15,7 @@ Turn raw conversation histories into structured, persistent memories.
 
 ```python
 from kemi.core import Memory
-from kemi.memory_formation import remember_from_conversation, OpenAIMemoryExtractor
+from kemi.memory.formation import remember_from_conversation, OpenAIMemoryExtractor
 
 # Initialise kemi
 mem = Memory()
@@ -51,7 +51,7 @@ Zero-dependency heuristic extractor.  Matches common patterns such as
 "I like …", "My name is …", "I want to …".
 
 ```python
-from kemi.memory_formation import RegexMemoryExtractor
+from kemi.memory.formation import RegexMemoryExtractor
 
 extractor = RegexMemoryExtractor()
 candidates = extractor.extract(conversation, user_id="alice")
@@ -62,7 +62,7 @@ candidates = extractor.extract(conversation, user_id="alice")
 Uses the OpenAI Chat Completions API with a structured system prompt.
 
 ```python
-from kemi.memory_formation import OpenAIMemoryExtractor
+from kemi.memory.formation import OpenAIMemoryExtractor
 
 extractor = OpenAIMemoryExtractor(
     model="gpt-4o-mini",
@@ -77,7 +77,7 @@ Returns a fixed list of candidates.  Useful for deterministic testing
 or as a no-op placeholder.
 
 ```python
-from kemi.memory_formation import CandidateMemory, StaticMemoryExtractor
+from kemi.memory.formation import CandidateMemory, StaticMemoryExtractor
 
 extractor = StaticMemoryExtractor([
     CandidateMemory(content="Alice likes sushi", importance=0.7, tags=["preference"]),
@@ -89,7 +89,7 @@ extractor = StaticMemoryExtractor([
 Any class implementing the `LLMMemoryExtractor` protocol can be plugged in:
 
 ```python
-from kemi.memory_formation import CandidateMemory, LLMMemoryExtractor
+from kemi.memory.formation import CandidateMemory, LLMMemoryExtractor
 
 class MyExtractor:
     def extract(self, conversation, *, user_id, session_id=None):
@@ -118,7 +118,7 @@ list of `MemoryObject` instances that you can inspect or manipulate
 before storing.
 
 ```python
-from kemi.memory_formation import extract_memories
+from kemi.memory.formation import extract_memories
 
 memories = extract_memories(
     conversation,

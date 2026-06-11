@@ -61,7 +61,7 @@ TOPIC_TEMPLATES = [
 rng = random.Random(42)
 
 
-def generate_texts(count):
+def generate_texts(count: int) -> list[tuple[str, str]]:
     """Generate (text, topic) pairs."""
     samples = []
     while len(samples) < count:
@@ -71,12 +71,12 @@ def generate_texts(count):
     return samples
 
 
-def normalize(v):
+def normalize(v: list[float]) -> list[float]:
     n = math.sqrt(sum(x*x for x in v))
     return [x/n for x in v] if n > 0 else v
 
 
-def main():
+def main() -> None:
     cache = Path(__file__).resolve().parent / "real_embeddings_cache.pkl"
 
     if cache.exists():
@@ -116,14 +116,14 @@ def main():
             query_embs.append(normalize(emb.tolist()))
 
     # Group by topic for cluster analysis
-    topic_to_indices = {}
+    topic_to_indices: dict[str, list[int]] = {}
     for i, (_, topic) in enumerate(train_samples):
         topic_to_indices.setdefault(topic, []).append(i)
 
     print(f"\nTopic distribution: { {t: len(idxs) for t, idxs in topic_to_indices.items()} }", flush=True)
 
     # Compute centroids per topic
-    centroids = {}
+    centroids: dict[str, list[float]] = {}
     for topic, indices in topic_to_indices.items():
         if len(indices) >= 2:
             centroid = [0.0] * DIM
@@ -136,7 +136,8 @@ def main():
     print(f"Computed centroids for topics: {list(centroids.keys())}", flush=True)
 
     # Analyze intra vs inter-cluster similarity
-    intra_sims, inter_sims = [], []
+    intra_sims: list[float] = []
+    inter_sims: list[float] = []
     for i in range(REAL_COUNT):
         topic_i = next(t for t, idxs in topic_to_indices.items() if i in idxs)
         for j in range(i + 1, REAL_COUNT):

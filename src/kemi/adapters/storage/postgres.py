@@ -5,7 +5,8 @@ Requires: pip install kemi[postgres]
 Schema mirrors SQLite adapter:
 - memories table with VECTOR(dim) for embeddings, JSONB for metadata, TEXT[] for tags
 - schema_version table for migrations
-- Indexes: user_id, lifecycle_state, user_lifecycle, namespace, GIN on tags, GIN on FTS, ivfflat on embedding
+- Indexes: user_id, lifecycle_state, user_lifecycle, namespace,
+  GIN on tags, GIN on FTS, ivfflat on embedding
 
 Uses psycopg_pool.ConnectionPool for connection management.
 ANN search via <=> (cosine) operator, FTS via to_tsvector.
@@ -22,7 +23,8 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 if TYPE_CHECKING:
     pass
@@ -75,7 +77,7 @@ class PostgresStorageAdapter(StorageAdapter):
     ) -> None:
         self._dsn = dsn or os.environ.get("PG_DSN", "")
         if not self._dsn:
-            raise ValueError(
+            raise ConfigurationError(
                 "DSN must be provided or PG_DSN environment variable must be set. "
                 "Example: postgresql://user:pass@localhost:5432/kemi"
             )
@@ -131,7 +133,7 @@ class PostgresStorageAdapter(StorageAdapter):
             self._pool.close()
             self._pool = None
 
-    def __enter__(self) -> "PostgresStorageAdapter":
+    def __enter__(self) -> PostgresStorageAdapter:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -198,17 +200,17 @@ class PostgresStorageAdapter(StorageAdapter):
             "CREATE INDEX IF NOT EXISTS idx_memories_lifecycle ON memories(lifecycle_state)"
         )
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_user_lifecycle ON memories(user_id, lifecycle_state)"
+            "CREATE INDEX IF NOT EXISTS idx_memories_user_lifecycle ON memories(user_id, lifecycle_state)"  # noqa: E501
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_tags ON memories USING GIN(tags)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at)")
         conn.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_memories_embedding ON memories USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100)"
+            "CREATE INDEX IF NOT EXISTS idx_memories_embedding ON memories USING ivfflat(embedding vector_cosine_ops) WITH (lists = 100)"  # noqa: E501
         )
         # FTS expression index using GIN on to_tsvector(content)
         conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_memories_content_fts ON memories USING GIN(to_tsvector('english', content))"
+            "CREATE INDEX IF NOT EXISTS idx_memories_content_fts ON memories USING GIN(to_tsvector('english', content))"  # noqa: E501
         )
         conn.commit()
 
@@ -562,7 +564,7 @@ class PostgresStorageAdapter(StorageAdapter):
             sql += " AND (m.session_id = %s OR m.session_id IS NULL)"
             params.append(session_id)
 
-        sql += f" ORDER BY fts_rank DESC LIMIT %s"
+        sql += " ORDER BY fts_rank DESC LIMIT %s"
         params.append(top_k)
 
         with self._connection() as conn:
@@ -617,7 +619,7 @@ class PostgresStorageAdapter(StorageAdapter):
             sql += " AND (m.session_id = %s OR m.session_id IS NULL)"
             params.append(session_id)
 
-        sql += f" ORDER BY vector_sim DESC LIMIT %s"
+        sql += " ORDER BY vector_sim DESC LIMIT %s"
         params.append(top_k * 3)
 
         with self._connection() as conn:
@@ -806,18 +808,24 @@ class PostgresStorageAdapter(StorageAdapter):
 
         return [self._row_to_memory(row) for row in rows]
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
         """Run schema migrations from from_version to to_version.
 
         Applies any needed ALTER TABLE statements or data migrations.
         """
-        if from_version >= to_version:
-            return
+        if to_version is None:
+            to_version = getattr(self, "CURRENT_VERSION", 1)
 
         with self._connection() as conn:
             current = self._get_schema_version(conn)
+
             if current >= to_version:
-                return  # Already at or beyond target version
+                return to_version  # Already at or beyond target version
+
+            if from_version is not None and from_version >= to_version:
+                return to_version
 
             # Apply incremental migrations
             # Example:
@@ -831,7 +839,8 @@ class PostgresStorageAdapter(StorageAdapter):
                     "INSERT INTO schema_version (version) VALUES (%s)",
                     (to_version,),
                 )
-                conn.commit()
+
+        return to_version
 
     def rebuild_fts_index(self, user_id: str | None = None) -> int:
         """Rebuild the GIN index on to_tsvector(content).

@@ -1,15 +1,35 @@
+import os
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 
 import pytest
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
-def sqlite_adapter() -> SQLiteStorageAdapter:
-    return SQLiteStorageAdapter(db_path=":memory:")
+def sqlite_adapter(tmp_path) -> SQLiteStorageAdapter:
+    """A fresh SQLite adapter backed by a temp file (not ``:memory:``).
+
+    A temp file is used instead of ``:memory:`` for two reasons:
+
+    1. ``:memory:`` creates a connection-scoped database. Each
+       ``_get_connection()`` call opens a brand-new empty database, so
+       data inserted in one method disappears before the next method
+       runs. The adapter's per-thread connection cache papers over
+       this within a single test, but it breaks if the test code (or
+       pytest internals) ever switches threads.
+    2. The temp file is automatically cleaned up by ``tmp_path`` when
+       the test ends, so there's no cross-test database leakage.
+    """
+    db_path = str(tmp_path / "test_kemi.db")
+    adapter = SQLiteStorageAdapter(db_path=db_path)
+    yield adapter
+    adapter.close()
 
 
 def test_store_and_get(sqlite_adapter) -> None:
@@ -383,8 +403,6 @@ def test_sqlite_close() -> None:
 
 
 def test_get_connection_creates_new_conn() -> None:
-    import os
-    import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = os.path.join(tmpdir, "test.db")
@@ -441,8 +459,6 @@ def test_context_manager_closes_on_exception() -> None:
 
 def test_context_manager_with_file_db() -> None:
     """Context manager works with file-based databases."""
-    import os
-    import tempfile
 
     tmp = tempfile.mktemp(suffix=".db")
     try:

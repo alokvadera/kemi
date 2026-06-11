@@ -1,449 +1,962 @@
-"""Tests for src/kemi/background_tasks.py"""
+"""Tests for src/kemi/background_tasks.py — background task management."""
+
+import asyncio
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kemi.background_tasks import (
+from kemi.infra.background_tasks import (
     BackgroundTaskManager,
     TaskResult,
     TaskStatus,
     TaskType,
+    get_task_manager,
 )
 
 
-class TestTaskResult:
-    """Tests for TaskResult dataclass."""
+def _drain_coro_threadsafe(coro, loop):
+    """Replacement for ``asyncio.run_coroutine_threadsafe`` used in tests.
 
-    def test_to_dict(self):
-        """Test TaskResult.to_dict() conversion."""
-        import time
-
-        result = TaskResult(
-            task_id="test-123",
-            task_type=TaskType.EMBED_BATCH,
-            status=TaskStatus.COMPLETED,
-            created_at=time.time(),
-            started_at=time.time(),
-            completed_at=time.time(),
-            result={"stored_count": 5},
-            error=None,
-            progress=1.0,
-        )
-
-        d = result.to_dict()
-        assert d["task_id"] == "test-123"
-        assert d["task_type"] == "embed_batch"
-        assert d["status"] == "completed"
-        assert d["result"]["stored_count"] == 5
-        assert d["progress"] == 1.0
+    The real function wraps a coroutine in a Future and schedules it on the
+    target loop. In tests we don't want the coroutine to actually run, but
+    we also need to avoid the "coroutine was never awaited" RuntimeWarning
+    that fires when a coroutine object is GC'd without being awaited.
+    Closing the coroutine consumes it and silences the warning.
+    """
+    if asyncio.iscoroutine(coro):
+        coro.close()
+    return MagicMock()
 
 
-class TestBackgroundTaskManager:
-    """Tests for BackgroundTaskManager."""
+# Track managers that started a background loop so the autouse fixture
+# below can shut them down at the end of each test. Without this the
+# daemon threads leak across tests, and a fresh BackgroundTaskManager
+# (or a previous test's still-running loop) can interfere with the next
+# test's behaviour.
+_started_managers: list[BackgroundTaskManager] = []
+_original_ensure_loop_started = BackgroundTaskManager._ensure_loop_started
 
-    def test_initialization(self):
-        """Test task manager initialization with default and custom params."""
-        tm = BackgroundTaskManager()
-        assert tm._max_concurrent == 3
-        assert tm._max_task_history == 1000
 
-        tm2 = BackgroundTaskManager(max_concurrent_tasks=5, max_task_history=500)
-        assert tm2._max_concurrent == 5
-        assert tm2._max_task_history == 500
+def _tracking_ensure_loop_started(self) -> None:
+    """Wrap the real ``_ensure_loop_started`` to register managers in
+    ``_started_managers`` so the autouse fixture can clean them up.
+    """
+    _original_ensure_loop_started(self)
+    if self._loop is not None:
+        _started_managers.append(self)
 
-    def test_submit_embed_batch_rejects_when_at_capacity(self):
-        """Test that submit_embed_batch raises RuntimeError when at max capacity."""
-        tm = BackgroundTaskManager(max_concurrent_tasks=2)
-        tm._running_count = 2  # Simulate at capacity
 
-        with pytest.raises(RuntimeError, match="Max concurrent tasks"):
-            tm.submit_embed_batch("user1", ["test content"], 0.5)
+@pytest.fixture(autouse=True)
+def _shutdown_started_managers(monkeypatch) -> None:
+    """Shut down any BackgroundTaskManager that started a loop during a test.
 
-    def test_submit_rebuild_fts_rejects_when_at_capacity(self):
-        """Test that submit_rebuild_fts_index raises RuntimeError when at max capacity."""
-        tm = BackgroundTaskManager(max_concurrent_tasks=2)
-        tm._running_count = 2  # Simulate at capacity
-
-        with pytest.raises(RuntimeError, match="Max concurrent tasks"):
-            tm.submit_rebuild_fts_index()
-
-    def test_get_stats(self):
-        """Test get_stats returns correct counts."""
-        tm = BackgroundTaskManager(max_concurrent_tasks=2)
-
-        stats = tm.get_stats()
-        assert stats["total_tasks"] == 0
-        assert stats["pending"] == 0
-        assert stats["running"] == 0
-        assert stats["completed"] == 0
-        assert stats["failed"] == 0
-        assert stats["max_concurrent"] == 2
-
-    def test_get_task_status_returns_none_for_missing(self):
-        """Test get_task_status returns None for unknown task_id."""
-        tm = BackgroundTaskManager()
-        result = tm.get_task_status("nonexistent-task-id")
-        assert result is None
-
-    def test_cancel_task_returns_false_for_nonexistent(self):
-        """Test cancel_task returns False for unknown task_id."""
-        tm = BackgroundTaskManager()
-        result = tm.cancel_task("nonexistent-task-id")
-        assert result is False
-
-    def test_list_tasks_empty(self):
-        """Test list_tasks returns empty list when no tasks."""
-        tm = BackgroundTaskManager()
-        tasks = tm.list_tasks()
-        assert tasks == []
-
-    def test_list_tasks_filters_by_status(self):
-        """Test list_tasks filtering by status."""
-        import time
-
-        tm = BackgroundTaskManager()
-
-        # Add a completed task directly
-        with tm._lock:
-            tm._tasks["task-1"] = TaskResult(
-                task_id="task-1",
-                task_type=TaskType.EMBED_BATCH,
-                status=TaskStatus.COMPLETED,
-                created_at=time.time(),
-            )
-            tm._tasks["task-2"] = TaskResult(
-                task_id="task-2",
-                task_type=TaskType.REBUILD_FTS_INDEX,
-                status=TaskStatus.RUNNING,
-                created_at=time.time(),
-            )
-
-        # Filter by completed
-        completed = tm.list_tasks(status=TaskStatus.COMPLETED)
-        assert len(completed) == 1
-        assert completed[0].task_id == "task-1"
-
-        # Filter by running
-        running = tm.list_tasks(status=TaskStatus.RUNNING)
-        assert len(running) == 1
-        assert running[0].task_id == "task-2"
-
-    def test_cancel_pending_task_succeeds(self):
-        """Test cancelling a pending task."""
-        import time
-
-        tm = BackgroundTaskManager()
-
-        # Add a pending task
-        with tm._lock:
-            tm._tasks["pending-task"] = TaskResult(
-                task_id="pending-task",
-                task_type=TaskType.EMBED_BATCH,
-                status=TaskStatus.PENDING,
-                created_at=time.time(),
-            )
-
-        # Cancel should succeed
-        result = tm.cancel_task("pending-task")
-        assert result is True
-
-        # Verify task is now failed with cancelled error
-        task = tm.get_task_status("pending-task")
-        assert task.status == TaskStatus.FAILED
-        assert task.error == "Cancelled by user"
-
-    def test_cancel_running_task_fails(self):
-        """Test that cancelling a running task returns False."""
-        import time
-
-        tm = BackgroundTaskManager()
-
-        # Add a running task
-        with tm._lock:
-            tm._tasks["running-task"] = TaskResult(
-                task_id="running-task",
-                task_type=TaskType.EMBED_BATCH,
-                status=TaskStatus.RUNNING,
-                created_at=time.time(),
-                started_at=time.time(),
-            )
-
-        # Cancel should fail for running task
-        result = tm.cancel_task("running-task")
-        assert result is False
-
-    def test_cleanup_old_tasks(self):
-        """Test that _cleanup_old_tasks removes old completed tasks."""
-        import time
-
-        tm = BackgroundTaskManager(max_task_history=2)
-
-        # Add 3 completed tasks (exceeds limit of 2)
-        for i in range(3):
-            with tm._lock:
-                tm._tasks[f"task-{i}"] = TaskResult(
-                    task_id=f"task-{i}",
-                    task_type=TaskType.EMBED_BATCH,
-                    status=TaskStatus.COMPLETED,
-                    created_at=time.time() - i,  # Older tasks have lower timestamp
-                    completed_at=time.time() - i,
-                )
-
-        # Trigger cleanup by adding new task
-        tm._running_count = 1  # At capacity
+    The real thread is daemon=True so it dies at interpreter shutdown, but
+    keeping a reference to a still-running loop across tests is a latent
+    flake source: a previous test's task could mutate shared module state
+    (the global ``_task_manager`` singleton) or fire into a future test's
+    patched methods.
+    """
+    monkeypatch.setattr(
+        BackgroundTaskManager,
+        "_ensure_loop_started",
+        _tracking_ensure_loop_started,
+    )
+    _started_managers.clear()
+    yield
+    for mgr in _started_managers:
         try:
-            tm.submit_embed_batch("user1", ["test"], 0.5)
-        except RuntimeError:
+            mgr.shutdown()
+        except Exception:
             pass
+        if mgr._thread is not None:
+            mgr._thread.join(timeout=0.5)
+    _started_managers.clear()
 
-        # Oldest task should be removed
-        with tm._lock:
-            assert len(tm._tasks) <= 2
 
+# ---------------------------------------------------------------------------
+# TaskType / TaskStatus enums
+# ---------------------------------------------------------------------------
 
 class TestTaskEnums:
-    """Tests for TaskType and TaskStatus enums."""
-
-    def test_task_type_values(self):
-        """Test TaskType enum values."""
+    def test_task_type_values(self) -> None:
         assert TaskType.EMBED_BATCH.value == "embed_batch"
         assert TaskType.REBUILD_FTS_INDEX.value == "rebuild_fts_index"
         assert TaskType.MIGRATE_EMBEDDINGS.value == "migrate_embeddings"
         assert TaskType.TTL_SWEEP.value == "ttl_sweep"
 
-    def test_task_status_values(self):
-        """Test TaskStatus enum values."""
+    def test_task_status_values(self) -> None:
         assert TaskStatus.PENDING.value == "pending"
         assert TaskStatus.RUNNING.value == "running"
         assert TaskStatus.COMPLETED.value == "completed"
         assert TaskStatus.FAILED.value == "failed"
 
 
-class TestBackgroundTaskManagerLoop:
-    """Tests for the background event loop."""
+# ---------------------------------------------------------------------------
+# TaskResult dataclass
+# ---------------------------------------------------------------------------
 
-    def test_ensure_loop_started_idempotent(self):
-        """Test that _ensure_loop_started is safe to call multiple times."""
-        tm = BackgroundTaskManager()
-        tm._ensure_loop_started()
-        assert tm._loop is not None
-        loop_ref = tm._loop
-        # Second call should be a no-op
-        tm._ensure_loop_started()
-        assert tm._loop is loop_ref
-        tm.shutdown()
+class TestTaskResult:
+    def test_task_result_defaults(self) -> None:
+        result = TaskResult(
+            task_id="test-123",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        assert result.started_at is None
+        assert result.completed_at is None
+        assert result.result is None
+        assert result.error is None
+        assert result.progress == 0.0
 
-    def test_get_loop_returns_loop(self):
-        """Test _get_loop returns a valid event loop."""
-        tm = BackgroundTaskManager()
-        loop = tm._get_loop()
-        assert loop is not None
-        assert isinstance(loop, type(__import__("asyncio").new_event_loop()))
-        tm.shutdown()
+    def test_task_result_to_dict(self) -> None:
+        result = TaskResult(
+            task_id="test-123",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.COMPLETED,
+            created_at=1234.0,
+            started_at=1235.0,
+            completed_at=1236.0,
+            result={"count": 5},
+            error=None,
+            progress=1.0,
+        )
+        d = result.to_dict()
+        assert d["task_id"] == "test-123"
+        assert d["task_type"] == "embed_batch"
+        assert d["status"] == "completed"
+        assert d["created_at"] == 1234.0
+        assert d["started_at"] == 1235.0
+        assert d["completed_at"] == 1236.0
+        assert d["result"] == {"count": 5}
+        assert d["error"] is None
+        assert d["progress"] == 1.0
 
-    def test_shutdown(self):
-        """Test graceful shutdown of the task manager."""
-        tm = BackgroundTaskManager()
-        tm._ensure_loop_started()
-        assert tm._loop is not None
-        tm.shutdown()
-        assert tm._loop is None
-        assert tm._thread is None
-
-    def test_shutdown_noop_when_not_started(self):
-        """Test shutdown is safe when loop was never started."""
-        tm = BackgroundTaskManager()
-        assert tm._loop is None
-        tm.shutdown()
-        assert tm._loop is None
+    def test_task_result_to_dict_with_error(self) -> None:
+        result = TaskResult(
+            task_id="test-456",
+            task_type=TaskType.TTL_SWEEP,
+            status=TaskStatus.FAILED,
+            created_at=100.0,
+            error="Something broke",
+        )
+        d = result.to_dict()
+        assert d["error"] == "Something broke"
+        assert d["status"] == "failed"
 
 
-class TestBackgroundTaskAsyncRunners:
-    """Tests for the actual async task runner coroutines."""
+# ---------------------------------------------------------------------------
+# BackgroundTaskManager — empty state
+# ---------------------------------------------------------------------------
 
-    def _run_coro(self, coro):
-        """Helper to run a coroutine in a fresh event loop."""
-        import asyncio
-        loop = asyncio.new_event_loop()
+class TestBackgroundTaskManagerEmpty:
+    def test_init_defaults(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr._max_concurrent == 3
+        assert mgr._max_task_history == 1000
+        stats = mgr.get_stats()
+        assert stats["total_tasks"] == 0
+        assert stats["pending"] == 0
+        assert stats["running"] == 0
+        assert stats["completed"] == 0
+        assert stats["failed"] == 0
+
+    def test_init_custom_limits(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=5, max_task_history=200)
+        assert mgr._max_concurrent == 5
+        assert mgr._max_task_history == 200
+
+    def test_get_task_status_missing(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr.get_task_status("nonexistent") is None
+
+    def test_list_tasks_empty(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr.list_tasks() == []
+
+    def test_list_tasks_with_limit(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr.list_tasks(limit=10) == []
+
+    def test_cancel_nonexistent_task(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr.cancel_task("nonexistent") is False
+
+    def test_cancel_pending_task(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        # Patch run_coroutine_threadsafe so the task never actually starts
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            task_id = mgr.submit_embed_batch("user1", ["content"])
+        status = mgr.get_task_status(task_id)
+        assert status is not None
+        assert status.status == TaskStatus.PENDING
+        assert mgr.cancel_task(task_id) is True
+        updated = mgr.get_task_status(task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "Cancelled by user"
+        assert updated.completed_at is not None
+
+    def test_cancel_running_task_with_future(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            task_id = mgr.submit_embed_batch("user1", ["content"])
+        # Manually flip to RUNNING so cancel sees it as already running
+        with mgr._lock:
+            mgr._tasks[task_id].status = TaskStatus.RUNNING
+        # MagicMock.cancel() returns a truthy MagicMock, so cancel succeeds
+        assert mgr.cancel_task(task_id) is True
+        updated = mgr.get_task_status(task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "Cancelled by user"
+
+    def test_cancel_running_task_when_future_cancel_returns_false(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            task_id = mgr.submit_embed_batch("user1", ["content"])
+        # Replace the future with one whose cancel() returns False
+        with mgr._lock:
+            mgr._tasks[task_id].status = TaskStatus.RUNNING
+            mgr._futures[task_id] = MagicMock()
+            mgr._futures[task_id].cancel.return_value = False
+        # Cooperative cancellation is initiated, so it returns True
+        assert mgr.cancel_task(task_id) is True
+
+    def test_shutdown_fresh_manager(self) -> None:
+        mgr = BackgroundTaskManager()
+        mgr.shutdown()
+        assert mgr._loop is None
+        assert mgr._thread is None
+
+    def test_active_task_count(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid1 = mgr.submit_embed_batch("user1", ["a"])
+            tid2 = mgr.submit_embed_batch("user1", ["b"])
+        with mgr._lock:
+            mgr._tasks[tid1].status = TaskStatus.RUNNING
+        assert mgr._active_task_count() == 2
+        with mgr._lock:
+            mgr._tasks[tid1].status = TaskStatus.COMPLETED
+        assert mgr._active_task_count() == 1
+        with mgr._lock:
+            mgr._tasks[tid2].status = TaskStatus.FAILED
+        assert mgr._active_task_count() == 0
+
+    def test_cleanup_old_tasks_no_op_when_under_limit(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10, max_task_history=100)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            for _ in range(5):
+                mgr.submit_embed_batch("user1", ["content"])
+        # Under limit, nothing removed
+        assert len(mgr._tasks) == 5
+        mgr._cleanup_old_tasks()
+        assert len(mgr._tasks) == 5
+
+    def test_cleanup_old_tasks_removes_oldest_completed(self) -> None:
+        mgr = BackgroundTaskManager(max_task_history=2)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid1 = mgr.submit_embed_batch("user1", ["content"])
+            tid2 = mgr.submit_embed_batch("user1", ["content"])
+            tid3 = mgr.submit_embed_batch("user1", ["content"])
+        # Mark two as completed so cleanup has candidates
+        with mgr._lock:
+            mgr._tasks[tid1].status = TaskStatus.COMPLETED
+            mgr._tasks[tid1].completed_at = 100.0
+            mgr._tasks[tid2].status = TaskStatus.COMPLETED
+            mgr._tasks[tid2].completed_at = 200.0
+            mgr._tasks[tid3].status = TaskStatus.PENDING
+        mgr._cleanup_old_tasks()
+        # Oldest completed (tid1) should be removed, tid2 and tid3 remain
+        assert tid1 not in mgr._tasks
+        assert tid2 in mgr._tasks
+        assert tid3 in mgr._tasks
+
+    def test_list_tasks_filter_by_status(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid1 = mgr.submit_embed_batch("user1", ["content"])
+            tid2 = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid1].status = TaskStatus.COMPLETED
+            mgr._tasks[tid2].status = TaskStatus.PENDING
+        completed = mgr.list_tasks(status=TaskStatus.COMPLETED)
+        assert len(completed) == 1
+        assert completed[0].task_id == tid1
+        pending = mgr.list_tasks(status=TaskStatus.PENDING)
+        assert len(pending) == 1
+        assert pending[0].task_id == tid2
+
+    def test_list_tasks_filter_no_match(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            mgr.submit_embed_batch("user1", ["content"])
+        assert mgr.list_tasks(status=TaskStatus.FAILED) == []
+        assert mgr.list_tasks(status=TaskStatus.RUNNING) == []
+
+    def test_list_tasks_sorted_descending(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            mgr.submit_embed_batch("user1", ["content"])
+            time.sleep(0.01)
+            mgr.submit_embed_batch("user1", ["content"])
+        tasks = mgr.list_tasks()
+        assert len(tasks) == 2
+        # Most recent first
+        assert tasks[0].created_at >= tasks[1].created_at
+
+    def test_list_tasks_respects_limit(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            for _ in range(5):
+                mgr.submit_embed_batch("user1", ["content"])
+                time.sleep(0.001)
+        tasks = mgr.list_tasks(limit=2)
+        assert len(tasks) == 2
+
+    def test_stats_after_submission(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            mgr.submit_embed_batch("user1", ["content"])
+        stats = mgr.get_stats()
+        assert stats["total_tasks"] == 1
+        assert stats["pending"] == 1
+        assert stats["running"] == 0
+        assert stats["completed"] == 0
+        assert stats["failed"] == 0
+        assert stats["max_concurrent"] == 10
+
+    def test_rebuild_fts_submission(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            task_id = mgr.submit_rebuild_fts_index("user1")
+        status = mgr.get_task_status(task_id)
+        assert status is not None
+        assert status.task_type == TaskType.REBUILD_FTS_INDEX
+        assert status.status == TaskStatus.PENDING
+
+    def test_ttl_sweep_submission(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            task_id = mgr.submit_ttl_sweep("user1", namespace="ns1")
+        status = mgr.get_task_status(task_id)
+        assert status is not None
+        assert status.task_type == TaskType.TTL_SWEEP
+        assert status.status == TaskStatus.PENDING
+
+    def test_max_concurrent_rejection(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=1)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            mgr.submit_embed_batch("user1", ["content"])
+            # Manually bump running count so next submit is rejected
+            with mgr._lock:
+                mgr._running_count = 1
+            with pytest.raises(RuntimeError, match="Max concurrent tasks"):
+                mgr.submit_embed_batch("user1", ["content"])
+
+    def test_ensure_loop_started(self) -> None:
+        mgr = BackgroundTaskManager()
+        assert mgr._loop is None
+        mgr._ensure_loop_started()
+        assert mgr._loop is not None
+        assert mgr._thread is not None
+        assert mgr._thread.is_alive()
+        mgr.shutdown()
+        # shutdown() now joins and closes the loop internally
+        assert mgr._loop is None
+        assert mgr._thread is None
+
+
+# ---------------------------------------------------------------------------
+# BackgroundTaskManager — cancel / shutdown edge cases
+# ---------------------------------------------------------------------------
+
+class TestBackgroundTaskManagerCancelShutdown:
+    def test_shutdown_cancels_pending_tasks(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        mgr.shutdown()
+        updated = mgr.get_task_status(tid)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "Cancelled by shutdown"
+        assert updated.completed_at is not None
+
+    def test_shutdown_cancels_running_tasks(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid].status = TaskStatus.RUNNING
+        mgr.shutdown()
+        updated = mgr.get_task_status(tid)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert updated.error == "Cancelled by shutdown"
+        assert tid in mgr._cancelled_ids
+
+    @pytest.mark.asyncio
+    async def test_shutdown_preserves_cancelled_by_shutdown_message(self) -> None:
+        """If shutdown() flags a running task and the coroutine later hits the
+        checkpoint, the 'Cancelled by shutdown' message is preserved."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.RUNNING,
+            created_at=time.time(),
+        )
+        mgr._cancelled_ids.add("tid1")
+        # Simulate what shutdown() does: set FAILED + "Cancelled by shutdown"
+        mgr._tasks["tid1"].status = TaskStatus.FAILED
+        mgr._tasks["tid1"].error = "Cancelled by shutdown"
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by shutdown"
+
+    def test_shutdown_clears_futures(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            mgr.submit_embed_batch("user1", ["content"])
+        assert len(mgr._futures) == 1
+        mgr.shutdown()
+        assert len(mgr._futures) == 0
+
+    def test_shutdown_idempotent_on_fresh_manager(self) -> None:
+        mgr = BackgroundTaskManager()
+        # Should not raise even when no loop was ever started
+        mgr.shutdown()
+        assert mgr._loop is None
+        assert mgr._thread is None
+
+    def test_cancel_task_already_completed(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid].status = TaskStatus.COMPLETED
+        assert mgr.cancel_task(tid) is False
+        assert mgr.get_task_status(tid).status == TaskStatus.COMPLETED
+
+    def test_cancel_task_already_failed(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid].status = TaskStatus.FAILED
+        assert mgr.cancel_task(tid) is False
+        assert mgr.get_task_status(tid).status == TaskStatus.FAILED
+
+    @pytest.mark.asyncio
+    async def test_cancelled_id_checked_inside_coro(self) -> None:
+        """A task whose ID is in _cancelled_ids is marked FAILED, not COMPLETED."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        mgr._cancelled_ids.add("tid1")
+
+        await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        # CancelledError is explicitly caught and the task is marked FAILED
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by user"
+        assert status.completed_at is not None
+        assert mgr._running_count == 0
+
+    def test_cancel_running_task_future_cancel_false_returns_false(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid].status = TaskStatus.RUNNING
+            # future.cancel() returns False → cooperative cancel path
+            # still initiates cancellation and returns True.
+            fake_future = MagicMock()
+            fake_future.cancel.return_value = False
+            mgr._futures[tid] = fake_future
+        assert mgr.cancel_task(tid) is True
+        assert tid in mgr._cancelled_ids
+
+    def test_cancel_running_task_future_is_none(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        with patch("kemi.infra.background_tasks.asyncio.run_coroutine_threadsafe", side_effect=_drain_coro_threadsafe):  # noqa: E501
+            tid = mgr.submit_embed_batch("user1", ["content"])
+        with mgr._lock:
+            mgr._tasks[tid].status = TaskStatus.RUNNING
+            # The future was already popped from _futures
+            mgr._futures.pop(tid, None)
+        # Cooperative cancellation is still initiated even without a future
+        assert mgr.cancel_task(tid) is True
+        assert tid in mgr._cancelled_ids
+
+
+# ---------------------------------------------------------------------------
+# BackgroundTaskManager — async task lifecycle (with mocked Memory)
+# ---------------------------------------------------------------------------
+
+class TestBackgroundTaskManagerLifecycle:
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_success(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1", "mem2"]
+
+        # Pre-create task entry since _run_embed_batch expects it
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a", "b"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.COMPLETED
+        assert status.result == {"stored_count": 2, "user_id": "user1"}
+        assert status.progress == 1.0
+        assert status.started_at is not None
+        assert status.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_failure(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.side_effect = RuntimeError("DB error")
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert "DB error" in status.error
+        assert status.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_cancelled_after_work(self) -> None:
+        """A task flagged as cancelled during work is marked FAILED, not COMPLETED."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        # Flag the task as cancelled before the coroutine starts
+        mgr._cancelled_ids.add("tid1")
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by user"
+        assert status.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_cancelled_during_work(self) -> None:
+        """A task flagged as cancelled mid-work hits the post-work checkpoint."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        # Simulate a cancel that arrives while remember_many is running:
+        # patch _cancelled_ids so the post-work check sees the flag.
+        def _flag_after_remember(*args, **kwargs):
+            mgr._cancelled_ids.add("tid1")
+            return ["mem1"]
+
+        mock_memory.remember_many.side_effect = _flag_after_remember
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by user"
+        assert status.completed_at is not None
+        assert status.result is None
+
+    @pytest.mark.asyncio
+    async def test_run_rebuild_fts_success(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_store = MagicMock()
+        mock_store.rebuild_fts_index.return_value = 42
+        mock_memory = MagicMock()
+        mock_memory._store = mock_store
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.REBUILD_FTS_INDEX,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_rebuild_fts("tid1", "user1")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.COMPLETED
+        assert status.result["rebuilt"] is True
+        assert status.result["count"] == 42
+        assert status.result["user_id"] == "user1"
+        assert status.result["scope"] == "user"
+
+    @pytest.mark.asyncio
+    async def test_run_rebuild_fts_no_support(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        # _store exists but lacks rebuild_fts_index → triggers else branch
+        mock_memory._store = MagicMock(spec=[])
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.REBUILD_FTS_INDEX,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_rebuild_fts("tid1", None)
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.COMPLETED
+        assert status.result["rebuilt"] is False
+
+    @pytest.mark.asyncio
+    async def test_run_rebuild_fts_cancelled(self) -> None:
+        """A rebuild task flagged as cancelled mid-work is marked FAILED."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_store = MagicMock()
+        mock_store.rebuild_fts_index.return_value = 42
+        mock_memory = MagicMock()
+        mock_memory._store = mock_store
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.REBUILD_FTS_INDEX,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        # Flag the task as cancelled before the coroutine starts
+        mgr._cancelled_ids.add("tid1")
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_rebuild_fts("tid1", "user1")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by user"
+        assert status.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_run_ttl_sweep_cancelled(self) -> None:
+        """A TTL sweep flagged as cancelled mid-work is marked FAILED."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.prune_expired.return_value = 7
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.TTL_SWEEP,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        # Flag the task as cancelled before the coroutine starts
+        mgr._cancelled_ids.add("tid1")
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_ttl_sweep("tid1", "user1", "ns1")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert status.error == "Cancelled by user"
+        assert status.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_run_rebuild_fts_failure(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_store = MagicMock()
+        mock_store.rebuild_fts_index.side_effect = Exception("fts fail")
+        mock_memory = MagicMock()
+        mock_memory._store = mock_store
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.REBUILD_FTS_INDEX,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_rebuild_fts("tid1", None)
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert "fts fail" in status.error
+
+    @pytest.mark.asyncio
+    async def test_run_ttl_sweep_success(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.prune_expired.return_value = 7
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.TTL_SWEEP,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_ttl_sweep("tid1", "user1", "ns1")
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.COMPLETED
+        assert status.result == {"deleted_count": 7, "user_id": "user1", "namespace": "ns1"}
+
+    @pytest.mark.asyncio
+    async def test_run_ttl_sweep_failure(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.prune_expired.side_effect = Exception("prune fail")
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.TTL_SWEEP,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_ttl_sweep("tid1", None, None)
+
+        status = mgr.get_task_status("tid1")
+        assert status is not None
+        assert status.status == TaskStatus.FAILED
+        assert "prune fail" in status.error
+
+    @pytest.mark.asyncio
+    async def test_running_count_decremented_on_success(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = []
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        assert mgr._running_count == 0
+
+    @pytest.mark.asyncio
+    async def test_running_count_decremented_on_failure(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.side_effect = RuntimeError("fail")
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        assert mgr._running_count == 0
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_closes_memory_on_success(self) -> None:
+        """When no external memory is passed, the task must close the Memory it creates."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        mock_memory.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_closes_memory_on_failure(self) -> None:
+        """Memory is closed even when the task raises an exception."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.side_effect = RuntimeError("fail")
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        mock_memory.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_does_not_close_passed_memory(self) -> None:
+        """When an external memory instance is passed, the task must NOT close it."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        # Pass memory directly — task should not close it
+        await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns", memory=mock_memory)
+
+        mock_memory.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_rebuild_fts_closes_memory(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory._store = MagicMock(spec=["rebuild_fts_index"])
+        mock_memory._store.rebuild_fts_index.return_value = 10
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.REBUILD_FTS_INDEX,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_rebuild_fts("tid1", "user1")
+
+        mock_memory.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_ttl_sweep_closes_memory(self) -> None:
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.prune_expired.return_value = 3
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.TTL_SWEEP,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_ttl_sweep("tid1", "user1", "ns1")
+
+        mock_memory.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_embed_batch_no_close_when_cancelled_before_instantiation(self) -> None:
+        """If cancelled before Memory() is called, no Memory exists to close."""
+        mgr = BackgroundTaskManager(max_concurrent_tasks=10)
+        mock_memory = MagicMock()
+        mock_memory.remember_many.return_value = ["mem1"]
+
+        mgr._tasks["tid1"] = TaskResult(
+            task_id="tid1",
+            task_type=TaskType.EMBED_BATCH,
+            status=TaskStatus.PENDING,
+            created_at=time.time(),
+        )
+        mgr._cancelled_ids.add("tid1")
+
+        with patch("kemi.Memory", return_value=mock_memory):
+            await mgr._run_embed_batch("tid1", "user1", ["a"], 0.5, "ns")
+
+        # Memory() is never called because the pre-work CancelledError fires first
+        mock_memory.close.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# get_task_manager singleton
+# ---------------------------------------------------------------------------
+
+class TestGetTaskManager:
+    def test_singleton_returns_same_instance(self) -> None:
+        # Use fresh module state by manipulating the global
+        import kemi.infra.background_tasks as bt
+        orig = bt._task_manager
+        bt._task_manager = None
         try:
-            return loop.run_until_complete(coro)
+            m1 = get_task_manager()
+            m2 = get_task_manager()
+            assert m1 is m2
         finally:
-            loop.close()
+            bt._task_manager = orig
 
-    def test_run_embed_batch_success(self, monkeypatch):
-        """Test _run_embed_batch stores results on success."""
-        import time
-        from unittest.mock import MagicMock
-
-        # Mock Memory to avoid real DB connections
-        mock_mem = MagicMock()
-        mock_mem.remember_many.return_value = ["id1", "id2"]
-        monkeypatch.setitem(__import__("sys").modules, "kemi", MagicMock())
-        import kemi
-        kemi.Memory = lambda: mock_mem
-
-        tm = BackgroundTaskManager()
-        task_id = str(__import__("uuid").uuid4())
-
-        with tm._lock:
-            tm._tasks[task_id] = TaskResult(
-                task_id=task_id,
-                task_type=TaskType.EMBED_BATCH,
-                status=TaskStatus.PENDING,
-                created_at=time.time(),
-            )
-
-        coro = tm._run_embed_batch(task_id, "user1", ["hello", "world"], 0.5, "default")
-        self._run_coro(coro)
-
-        task = tm.get_task_status(task_id)
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result["stored_count"] == 2
-        tm.shutdown()
-
-    def test_run_rebuild_fts_without_fts_support(self, monkeypatch):
-        """Test _run_rebuild_fts when store lacks rebuild_fts_index."""
-        import time
-        from unittest.mock import MagicMock
-
-        mock_mem = MagicMock()
-        mock_mem._store = MagicMock()
-        del mock_mem._store.rebuild_fts_index  # Remove the method
-        monkeypatch.setitem(__import__("sys").modules, "kemi", MagicMock())
-        import kemi
-        kemi.Memory = lambda: mock_mem
-
-        tm = BackgroundTaskManager()
-        task_id = str(__import__("uuid").uuid4())
-
-        with tm._lock:
-            tm._tasks[task_id] = TaskResult(
-                task_id=task_id,
-                task_type=TaskType.REBUILD_FTS_INDEX,
-                status=TaskStatus.PENDING,
-                created_at=time.time(),
-            )
-
-        coro = tm._run_rebuild_fts(task_id, None)
-        self._run_coro(coro)
-
-        task = tm.get_task_status(task_id)
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result["rebuilt"] is False
-        tm.shutdown()
-
-    def test_run_ttl_sweep(self, monkeypatch):
-        """Test _run_ttl_sweep executes and reports results."""
-        import time
-        from unittest.mock import MagicMock
-
-        mock_mem = MagicMock()
-        mock_mem.prune_expired.return_value = 5
-        monkeypatch.setitem(__import__("sys").modules, "kemi", MagicMock())
-        import kemi
-        kemi.Memory = lambda: mock_mem
-
-        tm = BackgroundTaskManager()
-        task_id = str(__import__("uuid").uuid4())
-
-        with tm._lock:
-            tm._tasks[task_id] = TaskResult(
-                task_id=task_id,
-                task_type=TaskType.TTL_SWEEP,
-                status=TaskStatus.PENDING,
-                created_at=time.time(),
-            )
-
-        coro = tm._run_ttl_sweep(task_id, "user1", "default")
-        self._run_coro(coro)
-
-        task = tm.get_task_status(task_id)
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result["deleted_count"] == 5
-        tm.shutdown()
-
-
-class TestTaskManagerGlobal:
-    """Tests for the global task manager instance."""
-
-    def test_get_task_manager_creates_instance(self, monkeypatch):
-        """Test get_task_manager creates a BackgroundTaskManager."""
-        import kemi.background_tasks as bt
-
-        # Reset global state
-        monkeypatch.setattr(bt, "_task_manager", None)
-        manager = bt.get_task_manager()
-        assert isinstance(manager, BackgroundTaskManager)
-        assert bt._task_manager is manager
-
-    def test_get_task_manager_returns_same_instance(self, monkeypatch):
-        """Test get_task_manager returns the same singleton."""
-        import kemi.background_tasks as bt
-
-        monkeypatch.setattr(bt, "_task_manager", None)
-        m1 = bt.get_task_manager()
-        m2 = bt.get_task_manager()
-        assert m1 is m2
-
-    def test_get_task_manager_respects_env_var(self, monkeypatch):
-        """Test KEMI_MAX_BACKGROUND_TASKS env var."""
-        import kemi.background_tasks as bt
-
+    def test_singleton_respects_env_var(self, monkeypatch) -> None:
+        import kemi.infra.background_tasks as bt
+        orig = bt._task_manager
+        bt._task_manager = None
         monkeypatch.setenv("KEMI_MAX_BACKGROUND_TASKS", "7")
-        monkeypatch.setattr(bt, "_task_manager", None)
-        manager = bt.get_task_manager()
-        assert manager._max_concurrent == 7
-
-
-class TestTTLSweepTask:
-    """Tests for the TTL sweep background task."""
-
-    def test_submit_ttl_sweep_rejects_when_at_capacity(self):
-        """Test that submit_ttl_sweep raises RuntimeError when at max capacity."""
-        tm = BackgroundTaskManager(max_concurrent_tasks=1)
-        tm._running_count = 1  # At capacity
-
-        with pytest.raises(RuntimeError, match="Max concurrent tasks"):
-            tm.submit_ttl_sweep(user_id="user1")
-
-    def test_submit_ttl_sweep_creates_pending_task(self):
-        """Test that submit_ttl_sweep creates a PENDING task entry."""
-        tm = BackgroundTaskManager()
-        task_id = tm.submit_ttl_sweep(user_id="user1")
-
-        task = tm.get_task_status(task_id)
-        assert task is not None
-        assert task.task_id == task_id
-        assert task.task_type == TaskType.TTL_SWEEP
-        # The async task runner creates a Memory() instance that connects to
-        # the default ~/.kemi/memories.db path. If that database doesn't exist
-        # or has a different schema version, the task may fail. That's OK for
-        # this test — we only verify that the task entry was created correctly.
-        assert task.status in {
-            TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.COMPLETED, TaskStatus.FAILED,
-        }
-
-    def test_submit_ttl_sweep_all_users(self):
-        """Test submit_ttl_sweep with no user_id (sweep all)."""
-        tm = BackgroundTaskManager()
-        task_id = tm.submit_ttl_sweep()
-        assert task_id is not None
-        task = tm.get_task_status(task_id)
-        assert task is not None
-        assert task.task_type == TaskType.TTL_SWEEP
-
-    def test_list_tasks_includes_ttl_sweep(self):
-        """Test that ttl_sweep tasks appear in list_tasks()."""
-        import time
-
-        tm = BackgroundTaskManager()
-        with tm._lock:
-            tm._tasks["ttl-task-1"] = TaskResult(
-                task_id="ttl-task-1",
-                task_type=TaskType.TTL_SWEEP,
-                status=TaskStatus.COMPLETED,
-                created_at=time.time(),
-            )
-
-        all_tasks = tm.list_tasks()
-        assert len(all_tasks) == 1
-        assert all_tasks[0].task_type == TaskType.TTL_SWEEP
+        try:
+            m = get_task_manager()
+            assert m._max_concurrent == 7
+        finally:
+            bt._task_manager = orig

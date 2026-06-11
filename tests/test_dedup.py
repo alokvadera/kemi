@@ -1,39 +1,26 @@
-from datetime import datetime, timezone
+"""Tests for src/kemi/dedup.py — memory deduplication and conflict detection."""
 
-from kemi import dedup
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from __future__ import annotations
+
+import math
+
+from kemi.memory import dedup
+from tests._helpers.factories import make_memory
 
 
 def test_find_duplicates_above_threshold() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="old",
             user_id="user",
             content="I am vegetarian",
             embedding=[1.0] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=64,
         )
     ]
 
@@ -43,35 +30,18 @@ def test_find_duplicates_above_threshold() -> None:
 
 
 def test_find_duplicates_below_threshold() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="old",
             user_id="user",
             content="I live in NYC",
             embedding=[1.0 if i % 2 == 0 else -1.0 for i in range(64)],
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=64,
         )
     ]
 
@@ -80,76 +50,42 @@ def test_find_duplicates_below_threshold() -> None:
 
 
 def test_find_conflicts_in_range() -> None:
-    import math
-
     rad = 50 * math.pi / 180
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I like running",
         embedding=[1.0, 0.0] * 32,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     conflicting = [math.cos(rad), math.sin(rad)] * 32
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="old",
             user_id="user",
             content="I hate running",
             embedding=conflicting,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=64,
         )
     ]
 
-    result = dedup.find_conflicts(new_mem, existing, conflict_threshold=0.65, dedup_threshold=0.85)
+    result = dedup.find_conflicts(
+        new_mem, existing, conflict_threshold=0.65, dedup_threshold=0.85
+    )
     assert len(result) == 1
 
 
 def test_find_duplicates_and_conflicts_no_overlap() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="dup",
             user_id="user",
             content="I am vegetarian",
             embedding=[1.0] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=64,
         )
     ]
 
@@ -164,34 +100,17 @@ def test_find_duplicates_and_conflicts_no_overlap() -> None:
 
 
 def test_resolve_duplicate_preserves_memory_id() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian now",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
-    existing = MemoryObject(
+    existing = make_memory(
         memory_id="old-id",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
 
     resolved = dedup.resolve_duplicate(new_mem, existing)
@@ -199,34 +118,17 @@ def test_resolve_duplicate_preserves_memory_id() -> None:
 
 
 def test_resolve_duplicate_updates_content() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian now",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
-    existing = MemoryObject(
+    existing = make_memory(
         memory_id="old-id",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
 
     resolved = dedup.resolve_duplicate(new_mem, existing)
@@ -234,34 +136,17 @@ def test_resolve_duplicate_updates_content() -> None:
 
 
 def test_resolve_duplicate_no_mutation() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian now",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
-    existing = MemoryObject(
+    existing = make_memory(
         memory_id="old-id",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
 
     original_existing_content = existing.content
@@ -274,35 +159,18 @@ def test_resolve_duplicate_no_mutation() -> None:
 
 
 def test_find_duplicates_with_none_embedding() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I am vegetarian",
         embedding=[1.0] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="old",
             user_id="user",
             content="I also am vegetarian",
             embedding=None,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=None,
         )
     ]
 
@@ -311,37 +179,47 @@ def test_find_duplicates_with_none_embedding() -> None:
 
 
 def test_find_conflicts_with_none_embedding() -> None:
-    new_mem = MemoryObject(
+    new_mem = make_memory(
         memory_id="new",
         user_id="user",
         content="I like running",
         embedding=[0.75] * 64,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=64,
     )
-
     existing = [
-        MemoryObject(
+        make_memory(
             memory_id="old",
             user_id="user",
             content="I hate running",
             embedding=None,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            metadata={},
-            embedding_dim=None,
         )
     ]
 
-    result = dedup.find_conflicts(new_mem, existing, conflict_threshold=0.65, dedup_threshold=0.85)
+    result = dedup.find_conflicts(
+        new_mem, existing, conflict_threshold=0.65, dedup_threshold=0.85
+    )
     assert len(result) == 0
+
+
+def test_has_sentiment_flip_detects_flip() -> None:
+    result = dedup.has_sentiment_flip("I love cats", "I hate cats")
+    assert result is True
+
+
+def test_has_sentiment_flip_no_flip() -> None:
+    result = dedup.has_sentiment_flip("I love cats", "I love dogs")
+    assert result is False
+
+
+def test_has_sentiment_flip_no_common_nouns() -> None:
+    result = dedup.has_sentiment_flip("I love pizza", "I hate running")
+    assert result is False
+
+
+def test_has_sentiment_flip_negation_mismatch() -> None:
+    result = dedup.has_sentiment_flip("I do not like rain", "I like rain")
+    assert result is True
+
+
+def test_has_sentiment_flip_same_text() -> None:
+    result = dedup.has_sentiment_flip("I enjoy music", "I enjoy music")
+    assert result is False

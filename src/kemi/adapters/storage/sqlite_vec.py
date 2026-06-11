@@ -17,10 +17,10 @@ import sqlite3
 from typing import TYPE_CHECKING, Any
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-from kemi.models import LifecycleState, MemoryObject
+from kemi.memory.model import LifecycleState, MemoryObject
 
 if TYPE_CHECKING:
-    from kemi.encryption import EncryptionConfig
+    from kemi.infra.encryption import EncryptionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
         db_path: str = "kemi.db",
         embedding_dim: int = 384,
         lazy: bool = False,
-        encryption: "EncryptionConfig | None" = None,
+        encryption: EncryptionConfig | None = None,
     ) -> None:
         self._embedding_dim = embedding_dim
         self._lazy = lazy
@@ -98,15 +98,18 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
     def _get_connection(self) -> sqlite3.Connection:
         conn = super()._get_connection()
-        if _SQLITE_VEC_AVAILABLE and not self._vec_loaded:
-            try:
-                conn.enable_load_extension(True)
-                if _sqlite_vec is not None:
-                    _sqlite_vec.load(conn)
-                conn.enable_load_extension(False)
-                self._vec_loaded = True
-            except (sqlite3.OperationalError, AttributeError):  # pragma: no cover
-                pass
+        if _SQLITE_VEC_AVAILABLE:
+            # Load the vec0 extension per-connection (connections are
+            # thread-local, so each new connection needs its own load).
+            if not getattr(self._local, "vec_loaded", False):
+                try:
+                    conn.enable_load_extension(True)
+                    if _sqlite_vec is not None:
+                        _sqlite_vec.load(conn)
+                    conn.enable_load_extension(False)
+                    self._local.vec_loaded = True
+                except (sqlite3.OperationalError, AttributeError):  # pragma: no cover
+                    pass
         return conn
 
     # ── Schema ──────────────────────────────────────────────────
@@ -171,6 +174,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
             self._init_vec_table(conn)
             self._run_migrations(conn)
+            conn.commit()
 
     def _init_vec_table(self, conn: sqlite3.Connection) -> None:
         if not _SQLITE_VEC_AVAILABLE:
@@ -296,7 +300,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
                 row,
             )
 
-            if not self._vec_loaded or memory.embedding is None:
+            if not self._vec_ready() or memory.embedding is None:
                 return
 
             if self._lazy:
@@ -382,7 +386,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
         (e.g. it was flushed before, then updated and re-stored), we
         UPDATE the existing vec0 row instead of creating a duplicate.
         """
-        if not self._vec_loaded:
+        if not self._vec_ready():
             return
         if not self._has_pending():
             return
@@ -435,6 +439,12 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
     # ── Search ──────────────────────────────────────────────
 
+    def _vec_ready(self) -> bool:
+        """True if vec0 is available and the current thread's connection has it loaded."""
+        if not _SQLITE_VEC_AVAILABLE or not self._vec_loaded:
+            return False
+        return getattr(self._local, "vec_loaded", False)
+
     def search(
         self,
         user_id: str,
@@ -449,15 +459,20 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
         states_list = [s.value for s in lifecycle_filter]
 
-        if self._vec_loaded and query_embedding:
-            if self._lazy and self._has_pending():
-                self._flush_pending()
-            return self._search_vec(user_id, query_embedding, top_k, states_list, namespace)
+        if not _SQLITE_VEC_AVAILABLE or not self._vec_loaded or not query_embedding:
+            return super().search(
+                user_id, query_embedding, top_k, lifecycle_filter, namespace, session_id
+            )
 
-        # Fallback: brute-force scan via parent
-        return super().search(
-            user_id, query_embedding, top_k, lifecycle_filter, namespace, session_id
-        )
+        # Ensure the extension is loaded on this thread before using vec0.
+        self._get_connection()
+        if not getattr(self._local, "vec_loaded", False):
+            return super().search(
+                user_id, query_embedding, top_k, lifecycle_filter, namespace, session_id
+            )
+        if self._lazy and self._has_pending():
+            self._flush_pending()
+        return self._search_vec(user_id, query_embedding, top_k, states_list, namespace)
 
     def _search_vec(
         self,
@@ -522,7 +537,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
     def delete_by_id(self, memory_id: str) -> bool:
         with self._get_connection() as conn:
-            if self._vec_loaded:
+            if self._vec_ready():
                 row = conn.execute(
                     "SELECT vec_rowid FROM memories WHERE memory_id = ?",
                     (memory_id,),
@@ -544,7 +559,7 @@ class SQLiteVecStorageAdapter(SQLiteStorageAdapter):
 
     def delete_by_user(self, user_id: str) -> int:
         with self._get_connection() as conn:
-            if self._vec_loaded:
+            if self._vec_ready():
                 rows = conn.execute(
                     "SELECT vec_rowid FROM memories WHERE user_id = ? AND vec_rowid IS NOT NULL",
                     (user_id,),

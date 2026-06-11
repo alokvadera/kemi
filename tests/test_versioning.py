@@ -7,26 +7,29 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kemi.models import (
+from kemi.memory.model import (
     LifecycleState,
     MemoryObject,
     MemorySource,
     MemoryType,
 )
-from kemi.versions import (
+from kemi.memory.versions import (
     DiffResult,
     MemoryVersionStore,
     RollbackResult,
     diff_memories,
     enable_versioning,
 )
+from tests._helpers.factories import make_memory
+
+pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def make_memory(
+def _make_test_memory(
     memory_id: str = "mem-1",
     user_id: str = "user-1",
     content: str = "Hello world",
@@ -43,26 +46,23 @@ def make_memory(
 ) -> MemoryObject:
     """Helper to create a MemoryObject with sensible defaults."""
     now = datetime.now(timezone.utc)
-    return MemoryObject(
+    return make_memory(
         memory_id=memory_id,
         user_id=user_id,
         content=content,
         embedding=[0.1] * 64,
-        score=0.0,
         created_at=now,
         last_accessed_at=now,
         source=MemorySource.USER_STATED,
         importance=importance,
         lifecycle_state=lifecycle_state,
         metadata=metadata or {},
-        embedding_dim=64,
         tags=tags or [],
         confidence=confidence,
         memory_type=memory_type,
         session_id=session_id,
         namespace=namespace,
         version=version,
-        **extra,  # type: ignore[arg-type]
     )
 
 
@@ -75,7 +75,7 @@ def vs(tmp_path) -> MemoryVersionStore:
 
 @pytest.fixture
 def memory_v1() -> MemoryObject:
-    return make_memory(
+    return _make_test_memory(
         memory_id="mem-test",
         user_id="alice",
         content="Original content",
@@ -88,7 +88,7 @@ def memory_v1() -> MemoryObject:
 
 @pytest.fixture
 def memory_v2() -> MemoryObject:
-    return make_memory(
+    return _make_test_memory(
         memory_id="mem-test",
         user_id="alice",
         content="Updated content",
@@ -105,12 +105,12 @@ def memory_v2() -> MemoryObject:
 
 class TestRecordVersion:
     def test_record_version_returns_next_version(self, vs: MemoryVersionStore):
-        mem = make_memory(memory_id="mem-1", content="v1 content", version=1)
+        mem = _make_test_memory(memory_id="mem-1", content="v1 content", version=1)
         result = vs.record_version(mem, changed_by="update")
         assert result == 1
 
     def test_record_version_stores_snapshot(self, vs: MemoryVersionStore):
-        mem = make_memory(memory_id="mem-2", content="hello", version=1)
+        mem = _make_test_memory(memory_id="mem-2", content="hello", version=1)
         vs.record_version(mem, changed_by="update")
 
         versions = vs.list_versions("mem-2")
@@ -120,7 +120,7 @@ class TestRecordVersion:
         assert versions[0].changed_by == "update"
 
     def test_record_version_multiple_versions(self, vs: MemoryVersionStore):
-        mem = make_memory(memory_id="mem-3", content="v1", version=1)
+        mem = _make_test_memory(memory_id="mem-3", content="v1", version=1)
         vs.record_version(mem, changed_by="create")
 
         mem.content = "v2"
@@ -142,7 +142,7 @@ class TestRecordVersion:
         assert versions[2].version == 1
 
     def test_record_version_serialises_metadata_and_tags(self, vs: MemoryVersionStore):
-        mem = make_memory(
+        mem = _make_test_memory(
             memory_id="mem-4",
             content="data",
             version=1,
@@ -157,7 +157,7 @@ class TestRecordVersion:
 
     def test_record_version_serialises_embedding(self, vs: MemoryVersionStore):
         embedding = [0.1, 0.2, 0.3] * 21  # 63 floats
-        mem = make_memory(memory_id="mem-5", content="embed test", version=1)
+        mem = _make_test_memory(memory_id="mem-5", content="embed test", version=1)
         mem.embedding = embedding
         mem.embedding_dim = len(embedding)
         vs.record_version(mem, changed_by="update")
@@ -177,7 +177,7 @@ class TestListVersions:
 
     def test_list_versions_newest_first(self, vs: MemoryVersionStore):
         for i in range(1, 4):
-            mem = make_memory(memory_id="mem-10", content=f"v{i}", version=i)
+            mem = _make_test_memory(memory_id="mem-10", content=f"v{i}", version=i)
             vs.record_version(mem, changed_by="update")
 
         versions = vs.list_versions("mem-10")
@@ -185,7 +185,7 @@ class TestListVersions:
 
     def test_list_versions_respects_limit(self, vs: MemoryVersionStore):
         for i in range(1, 6):
-            mem = make_memory(memory_id="mem-11", content=f"v{i}", version=i)
+            mem = _make_test_memory(memory_id="mem-11", content=f"v{i}", version=i)
             vs.record_version(mem, changed_by="update")
 
         versions = vs.list_versions("mem-11")
@@ -211,10 +211,10 @@ class TestGetVersion:
         assert result is None
 
     def test_get_version_specific_version(self, vs: MemoryVersionStore):
-        mem = make_memory(memory_id="mem-20", content="v1", version=1)
+        mem = _make_test_memory(memory_id="mem-20", content="v1", version=1)
         vs.record_version(mem, changed_by="create")
 
-        mem = make_memory(memory_id="mem-20", content="v2", version=2)
+        mem = _make_test_memory(memory_id="mem-20", content="v2", version=2)
         vs.record_version(mem, changed_by="update")
 
         v1 = vs.get_version("mem-20", 1)
@@ -229,8 +229,8 @@ class TestGetVersion:
 
 class TestDiff:
     def test_diff_no_changes(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-30", content="same", version=1, importance=0.5)
-        mem2 = make_memory(memory_id="mem-30", content="same", version=2, importance=0.5)
+        mem1 = _make_test_memory(memory_id="mem-30", content="same", version=1, importance=0.5)
+        mem2 = _make_test_memory(memory_id="mem-30", content="same", version=2, importance=0.5)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -239,8 +239,8 @@ class TestDiff:
         assert result.field_changes == {}
 
     def test_diff_content_changed(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-31", content="old text", version=1)
-        mem2 = make_memory(memory_id="mem-31", content="new text", version=2)
+        mem1 = _make_test_memory(memory_id="mem-31", content="old text", version=1)
+        mem2 = _make_test_memory(memory_id="mem-31", content="new text", version=2)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -250,8 +250,8 @@ class TestDiff:
         assert result.field_changes["content"] == ("old text", "new text")
 
     def test_diff_importance_changed(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-32", importance=0.3, version=1)
-        mem2 = make_memory(memory_id="mem-32", importance=0.9, version=2)
+        mem1 = _make_test_memory(memory_id="mem-32", importance=0.3, version=1)
+        mem2 = _make_test_memory(memory_id="mem-32", importance=0.9, version=2)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -261,8 +261,8 @@ class TestDiff:
         assert result.field_changes["importance"] == (0.3, 0.9)
 
     def test_diff_tags_changed(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-33", tags=["a"], version=1)
-        mem2 = make_memory(memory_id="mem-33", tags=["a", "b"], version=2)
+        mem1 = _make_test_memory(memory_id="mem-33", tags=["a"], version=1)
+        mem2 = _make_test_memory(memory_id="mem-33", tags=["a", "b"], version=2)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -271,8 +271,8 @@ class TestDiff:
         assert "tags" in result.field_changes
 
     def test_diff_metadata_changed(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-34", metadata={"a": 1}, version=1)
-        mem2 = make_memory(memory_id="mem-34", metadata={"a": 2}, version=2)
+        mem1 = _make_test_memory(memory_id="mem-34", metadata={"a": 1}, version=1)
+        mem2 = _make_test_memory(memory_id="mem-34", metadata={"a": 2}, version=2)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -281,8 +281,8 @@ class TestDiff:
         assert "metadata" in result.field_changes
 
     def test_diff_memory_id_mismatch(self, vs: MemoryVersionStore):
-        mem1 = make_memory(memory_id="mem-35", content="v1", version=1)
-        mem2 = make_memory(memory_id="mem-35", content="v2", version=2)
+        mem1 = _make_test_memory(memory_id="mem-35", content="v1", version=1)
+        mem2 = _make_test_memory(memory_id="mem-35", content="v2", version=2)
         vs.record_version(mem1, changed_by="create")
         vs.record_version(mem2, changed_by="update")
 
@@ -290,14 +290,14 @@ class TestDiff:
         assert result is None
 
     def test_diff_multiple_fields(self, vs: MemoryVersionStore):
-        mem1 = make_memory(
+        mem1 = _make_test_memory(
             memory_id="mem-36",
             content="old",
             importance=0.3,
             tags=["tag1"],
             version=1,
         )
-        mem2 = make_memory(
+        mem2 = _make_test_memory(
             memory_id="mem-36",
             content="new",
             importance=0.8,
@@ -330,7 +330,7 @@ class TestRollback:
         store = SQLiteStorageAdapter(db_path=db_path)
 
         # Create and store original memory
-        mem_v1 = make_memory(
+        mem_v1 = _make_test_memory(
             memory_id="mem-rollback",
             user_id="bob",
             content="Original content here",
@@ -342,7 +342,7 @@ class TestRollback:
         vs.record_version(mem_v1, changed_by="create")
 
         # Update to v2
-        mem_v2 = make_memory(
+        mem_v2 = _make_test_memory(
             memory_id="mem-rollback",
             user_id="bob",
             content="Modified content",
@@ -368,7 +368,7 @@ class TestRollback:
         db_path = str(tmp_path / "rollback_test2.db")
         store = SQLiteStorageAdapter(db_path=db_path)
 
-        mem_v1 = make_memory(
+        mem_v1 = _make_test_memory(
             memory_id="mem-rb2",
             user_id="carol",
             content="v1 content",
@@ -378,7 +378,7 @@ class TestRollback:
         store.store(mem_v1)
         vs.record_version(mem_v1, changed_by="create")
 
-        mem_v2 = make_memory(
+        mem_v2 = _make_test_memory(
             memory_id="mem-rb2",
             user_id="carol",
             content="v2 content",
@@ -401,11 +401,11 @@ class TestRollback:
         db_path = str(tmp_path / "rollback_versions.db")
         store = SQLiteStorageAdapter(db_path=db_path)
 
-        mem_v1 = make_memory(memory_id="mem-rb3", content="v1", version=1)
+        mem_v1 = _make_test_memory(memory_id="mem-rb3", content="v1", version=1)
         store.store(mem_v1)
         vs.record_version(mem_v1, changed_by="create")
 
-        mem_v2 = make_memory(memory_id="mem-rb3", content="v2", version=2)
+        mem_v2 = _make_test_memory(memory_id="mem-rb3", content="v2", version=2)
         store.update(mem_v2)
         vs.record_version(mem_v2, changed_by="update")
 
@@ -421,11 +421,11 @@ class TestRollback:
         db_path = str(tmp_path / "rollback_result.db")
         store = SQLiteStorageAdapter(db_path=db_path)
 
-        mem_v1 = make_memory(memory_id="mem-rb4", content="v1", version=1)
+        mem_v1 = _make_test_memory(memory_id="mem-rb4", content="v1", version=1)
         store.store(mem_v1)
         vs.record_version(mem_v1, changed_by="create")
 
-        mem_v2 = make_memory(memory_id="mem-rb4", content="v2", version=2)
+        mem_v2 = _make_test_memory(memory_id="mem-rb4", content="v2", version=2)
         store.update(mem_v2)
         vs.record_version(mem_v2, changed_by="update")
 
@@ -447,7 +447,7 @@ class TestGetLatestVersionNumber:
 
     def test_get_latest_version_number(self, vs: MemoryVersionStore):
         for i in range(1, 4):
-            mem = make_memory(memory_id="mem-latest", version=i)
+            mem = _make_test_memory(memory_id="mem-latest", version=i)
             vs.record_version(mem, changed_by="update")
 
         latest = vs.get_latest_version_number("mem-latest")
@@ -460,8 +460,8 @@ class TestGetLatestVersionNumber:
 
 class TestDiffMemories:
     def test_diff_memories_content(self):
-        mem_before = make_memory(memory_id="mem-d1", content="old", version=1)
-        mem_after = make_memory(memory_id="mem-d1", content="new", version=2)
+        mem_before = _make_test_memory(memory_id="mem-d1", content="old", version=1)
+        mem_after = _make_test_memory(memory_id="mem-d1", content="new", version=2)
 
         result = diff_memories(mem_before, mem_after)
         assert isinstance(result, DiffResult)
@@ -469,14 +469,14 @@ class TestDiffMemories:
         assert result.field_changes["content"] == ("old", "new")
 
     def test_diff_memories_multiple_fields(self):
-        mem_before = make_memory(
+        mem_before = _make_test_memory(
             memory_id="mem-d2",
             content="old",
             importance=0.3,
             confidence=0.5,
             version=1,
         )
-        mem_after = make_memory(
+        mem_after = _make_test_memory(
             memory_id="mem-d2",
             content="new",
             importance=0.8,
@@ -490,7 +490,7 @@ class TestDiffMemories:
         assert "confidence" in result.field_changes
 
     def test_diff_memories_no_changes(self):
-        mem = make_memory(memory_id="mem-d3", content="same", version=1)
+        mem = _make_test_memory(memory_id="mem-d3", content="same", version=1)
         result = diff_memories(mem, mem)
         assert result.field_changes == {}
 
@@ -639,8 +639,8 @@ class TestVersioningConfig:
 
 class TestRecordBeforeUpdate:
     def test_record_before_update(self, vs: MemoryVersionStore):
-        mem_v1 = make_memory(memory_id="mem-rbu", content="v1", version=1)
-        mem_v2 = make_memory(memory_id="mem-rbu", content="v2", version=2)
+        mem_v1 = _make_test_memory(memory_id="mem-rbu", content="v1", version=1)
+        mem_v2 = _make_test_memory(memory_id="mem-rbu", content="v2", version=2)
         result = vs.record_before_update(mem_v1, mem_v2, changed_by="update")
         assert result == 2
 
@@ -657,7 +657,7 @@ class TestRecordBeforeUpdate:
 
 class TestBackwardCompatibility:
     def test_metadata_serialized_as_json_string(self, vs: MemoryVersionStore):
-        mem = make_memory(
+        mem = _make_test_memory(
             memory_id="mem-json",
             content="test",
             version=1,
@@ -686,7 +686,7 @@ class TestBackwardCompatibility:
 
     def test_isolation_between_memories(self, vs: MemoryVersionStore):
         for i in range(1, 4):
-            mem = make_memory(memory_id=f"mem-{i}", content=f"content-{i}", version=1)
+            mem = _make_test_memory(memory_id=f"mem-{i}", content=f"content-{i}", version=1)
             vs.record_version(mem, changed_by="create")
 
         assert len(vs.list_versions("mem-1")) == 1
@@ -703,7 +703,7 @@ class TestBackwardCompatibility:
 
 class TestSnapshotCompleteness:
     def test_version_snapshot_has_all_fields(self, vs: MemoryVersionStore):
-        mem = make_memory(
+        mem = _make_test_memory(
             memory_id="mem-complete",
             user_id="dave",
             content="All fields test",

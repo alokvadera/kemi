@@ -1,0 +1,25 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy src/kemi
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: pytest-smoke
+        name: pytest-smoke
+        entry: uv run pytest tests/ -x -q --no-cov --ignore=tests/adapters/test_chroma.py --ignore=tests/adapters/test_qdrant.py --ignore=tests/adapters/test_redis.py --ignore=tests/adapters/test_postgres.py
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-push]

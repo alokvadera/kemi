@@ -6,6 +6,7 @@ from threading import Lock
 from typing import Any
 
 from kemi.adapters.base import EmbeddingAdapter
+from kemi.exceptions import ConfigurationError, EmbeddingError
 
 # Tenacity for robust retry logic with exponential backoff
 try:
@@ -151,7 +152,7 @@ class CircuitBreaker:
 
 
 class OpenAIEmbedAdapter(EmbeddingAdapter):
-    """Embedding adapter using OpenAI's embedding API.
+    """Embedding adapter using OpenAI's embedding API (or compatible providers).
 
     Default model: text-embedding-3-small
     Default dimension: 1536
@@ -160,9 +161,13 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
     - Automatic retry with exponential backoff for transient errors
     - Configurable timeout for requests
     - Rate limit handling (429 errors)
+    - OpenAI-compatible provider support via base_url (e.g., Tokenlb, proxies)
 
     Args:
         api_key: OpenAI API key. Defaults to OPENAI_API_KEY env var.
+        base_url: Base URL for OpenAI-compatible endpoints. Defaults to
+            OPENAI_BASE_URL env var. Use this to connect to providers like
+            Tokenlb, local proxies, or other OpenAI-compatible services.
         model_name: Model to use. Defaults to text-embedding-3-small.
         timeout: Request timeout in seconds. Defaults to 60.
         max_retries: Maximum retry attempts for transient errors. Defaults to 3.
@@ -183,6 +188,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
     def __init__(
         self,
         api_key: str | None = None,
+        base_url: str | None = None,
         model_name: str | None = None,
         timeout: float | None = None,
         max_retries: int | None = None,
@@ -191,6 +197,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
         cb_recovery_timeout: float | None = None,
     ) -> None:
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self._base_url = base_url or os.environ.get("OPENAI_BASE_URL")
         self._model_name = model_name or self.DEFAULT_MODEL
         self._timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT
         self._max_retries = max_retries if max_retries is not None else self.DEFAULT_MAX_RETRIES
@@ -221,13 +228,16 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
             try:
                 from openai import OpenAI
 
-                self._client = OpenAI(
-                    api_key=self._api_key,
-                    timeout=self._timeout,
-                    max_retries=0,  # We handle retries ourselves via Tenacity
-                )
+                kwargs: dict[str, Any] = {
+                    "api_key": self._api_key,
+                    "timeout": self._timeout,
+                    "max_retries": 0,  # We handle retries ourselves via Tenacity
+                }
+                if self._base_url:
+                    kwargs["base_url"] = self._base_url
+                self._client = OpenAI(**kwargs)
             except ImportError as e:
-                raise ImportError("openai not installed. Run: pip install kemi[openai]") from e
+                raise ConfigurationError("openai not installed. Run: pip install kemi[openai]") from e  # noqa: E501
         return self._client
 
     def _is_openai_retryable(self, error: Exception) -> bool:
@@ -285,7 +295,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
         # Check circuit breaker state
         if not self._circuit_breaker.allow_request():
             state_info = self._circuit_breaker.get_state()
-            raise RuntimeError(
+            raise EmbeddingError(
                 f"Circuit breaker is {state_info['state']}. "
                 f"Failure count: {state_info['failure_count']}, "
                 f"Recovery timeout: {state_info['recovery_timeout']}s"
@@ -334,7 +344,7 @@ class OpenAIEmbedAdapter(EmbeddingAdapter):
         if last_exception is not None:
             self._circuit_breaker.record_failure()
             raise last_exception
-        raise RuntimeError("OpenAI embedding failed after retries")
+        raise EmbeddingError("OpenAI embedding failed after retries")
 
     def _on_success(self) -> None:
         """Called after successful embedding request to record success."""

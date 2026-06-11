@@ -20,12 +20,13 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 DIM = 384
 SCALES = [1000, 5000, 10000, 25000, 50000]
@@ -34,7 +35,7 @@ TOP_K = 10
 RNG = random.Random(42)
 
 
-def make_memory(memory_id, user_id, embedding):
+def make_memory(memory_id: str, user_id: str, embedding: list[float]) -> MemoryObject:
     return MemoryObject(
         memory_id=memory_id,
         user_id=user_id,
@@ -52,13 +53,19 @@ def make_memory(memory_id, user_id, embedding):
     )
 
 
-def random_embedding():
+def random_embedding() -> list[float]:
     return [RNG.random() for _ in range(DIM)]
 
 
-def benchmark_adapter(adapter_cls, label, scale, embeddings, query_embs):
+def benchmark_adapter(
+    adapter_cls: type[SQLiteStorageAdapter] | type[SQLiteVecStorageAdapter],
+    label: str,
+    scale: int,
+    embeddings: list[list[float]],
+    query_embs: list[list[float]],
+) -> tuple[float, list[float]]:
     """Benchmark insert + query for one adapter at one scale using :memory: DB."""
-    adapter_args = {"db_path": ":memory:"}
+    adapter_args: dict[str, Any] = {"db_path": ":memory:"}
     if issubclass(adapter_cls, SQLiteVecStorageAdapter):
         adapter_args["embedding_dim"] = DIM
 
@@ -93,9 +100,11 @@ def benchmark_adapter(adapter_cls, label, scale, embeddings, query_embs):
     return insert_time, query_times
 
 
-def benchmark_bruteforce_python(embeddings, query_embs):
+def benchmark_bruteforce_python(
+    embeddings: list[list[float]], query_embs: list[list[float]]
+) -> list[float]:
     """Pure Python cosine similarity scan — measures just the math."""
-    query_times = []
+    query_times: list[float] = []
     for qemb in query_embs:
         t0 = time.perf_counter()
         scores = []
@@ -112,9 +121,15 @@ def benchmark_bruteforce_python(embeddings, query_embs):
     return query_times
 
 
-def compute_recall(adapter_cls, label, scale, embeddings, query_embs):
+def compute_recall(
+    adapter_cls: type[SQLiteStorageAdapter] | type[SQLiteVecStorageAdapter],
+    label: str,
+    scale: int,
+    embeddings: list[list[float]],
+    query_embs: list[list[float]],
+) -> float:
     """Recall@10: what fraction of true top-10 are in ANN top-10."""
-    adapter_args = {"db_path": ":memory:"}
+    adapter_args: dict[str, Any] = {"db_path": ":memory:"}
     if issubclass(adapter_cls, SQLiteVecStorageAdapter):
         adapter_args["embedding_dim"] = DIM
 
@@ -145,7 +160,12 @@ def compute_recall(adapter_cls, label, scale, embeddings, query_embs):
     return sum(recalls) / len(recalls)
 
 
-def plot_results(results_brute, results_vec, recalls, python_times):
+def plot_results(
+    results_brute: list[dict[str, Any]],
+    results_vec: list[dict[str, Any]],
+    recalls: list[float],
+    python_times: list[float],
+) -> None:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -163,7 +183,7 @@ def plot_results(results_brute, results_vec, recalls, python_times):
     vec_medians = [r["query_median_ms"] for r in results_vec]
     python_medians = list(python_times)
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+    _fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 
     # ── Plot 1: Query latency ──
     ax = axes[0]
@@ -234,7 +254,7 @@ def plot_results(results_brute, results_vec, recalls, python_times):
     plt.close()
 
 
-def main():
+def main() -> None:
     if not _SQLITE_VEC_AVAILABLE:
         print("ERROR: sqlite-vec must be installed to run benchmarks.")
         print("Run: pip install sqlite-vec")
@@ -255,9 +275,9 @@ def main():
         print(f"\n--- Scale: {scale} vectors ---")
 
         # Generate data once per scale
-        embeddings = [random_embedding() for _ in range(scale)]
+        embeddings: list[list[float]] = [random_embedding() for _ in range(scale)]
         q_rng = random.Random(99)
-        query_embs = [[q_rng.random() for _ in range(DIM)]
+        query_embs: list[list[float]] = [[q_rng.random() for _ in range(DIM)]
                       for _ in range(QUERIES_PER_SCALE)]
 
         # 1) Pure Python brute-force

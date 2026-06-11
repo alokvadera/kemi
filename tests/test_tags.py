@@ -82,7 +82,7 @@ def test_recall_by_tag_different_user(mock_memory) -> None:
 
 
 def test_recall_by_tag_with_lifecycle_filter(mock_memory) -> None:
-    from kemi.models import LifecycleState
+    from kemi.memory.model import LifecycleState
 
     mock_memory.remember("user123", "I love pizza", tags=["food"])
 

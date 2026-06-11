@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from kemi import Memory, MemoryConfig
 from kemi.adapters.base import EmbeddingAdapter
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-from kemi.models import MemoryObject, MemoryType
+from kemi.memory.model import MemoryObject, MemoryType
 
 # ── Configuration ───────────────────────────────────────────────────
 DIM = 64
@@ -125,13 +125,13 @@ def _seed_memories(mem: Memory, user_id: str, count: int) -> list[dict[str, Any]
     Returns a list of dicts with keys: memory_id, entities, content.
     """
     records: list[dict[str, Any]] = []
-    for i in range(count):
+    for _i in range(count):
         n_entities = RNG.randint(0, 3)
         entities = _pick_entity_subset(RNG, n_entities)
         content = _make_memory_content(RNG, entities)
         emb = mem._embed.embed_single(content)
         mo = MemoryObject(
-            memory_id=f"bench-{user_id}-{i:05d}",
+            memory_id=f"bench-{user_id}-{_i:05d}",
             user_id=user_id,
             content=content,
             embedding=emb,
@@ -240,8 +240,8 @@ def _print_results(
         delta = on_v - off_v
         delta_pct = (delta / off_v * 100) if off_v != 0 else float("inf")
         print(
-            f"  {label:<28} {off_v:>12.{fmt[1]}} {on_v:>14.{fmt[1]}} "
-            f"{delta:>+11.{fmt[1]}} ({delta_pct:+.1f}%)"
+            f"  {label:<28} {off_v:>12{fmt}} {on_v:>14{fmt}} "
+            f"{delta:>+11{fmt}} ({delta_pct:+.1f}%)"
         )
 
     _row("Hit Rate", agg_off["hit_rate"], agg_on["hit_rate"])
@@ -328,7 +328,7 @@ def _save_graph(
         x = np.arange(len(labels))
         width = 0.35
 
-        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
+        _fig, axes = plt.subplots(nrows=2, ncols=1, figsize=(10, 10))
         ax1 = axes[0]
         bars1 = ax1.bar(
             x - width / 2, no_boost_vals, width,
@@ -515,12 +515,12 @@ def run_benchmark(
     _print_results(agg_off, agg_on, t_off, t_on)
 
     # ── Save JSON ──
-    results = _build_results(
+    out_results = _build_results(
         num_memories, num_queries, top_k,
         agg_off, agg_on, metrics_off, metrics_on, t_off, t_on,
     )
     with open(results_file, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(out_results, f, indent=2)
     print(f"\n  Results saved to {results_file}")
 
     # ── Generate graph ──
@@ -533,11 +533,11 @@ def run_benchmark(
     except OSError:
         pass
 
-    return results
+    return out_results
 
 
 def main() -> int:
-    results = run_benchmark(
+    run_benchmark(
         num_memories=NUM_MEMORIES,
         num_queries=NUM_QUERIES,
         top_k=TOP_K,

@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject
+from kemi.memory.model import LifecycleState, MemoryObject
 
 _FnMap = dict[
     str,
@@ -173,5 +173,11 @@ class CustomStorageAdapter(StorageAdapter):
             fn(user_id, tag, lifecycle_filter, **kwargs),
         )
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
-        self._get_fn("upgrade_schema")(from_version, to_version)
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        fn = self._get_fn("upgrade_schema")
+        from_v = from_version if from_version is not None else 0
+        to_v = to_version if to_version is not None else 1
+        fn(from_v, to_v)
+        return to_v

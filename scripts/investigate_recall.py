@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -29,7 +29,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (na * nb) if na * nb > 0 else 0
 
 
-def main():
+def main() -> None:
     if not _SQLITE_VEC_AVAILABLE:
         print("ERROR: sqlite-vec is required")
         sys.exit(1)
@@ -140,7 +140,7 @@ def main():
             all_precisions_at_k[k].append(hits / k)
 
         # 5) Within brute's top-10, what rank would ANN find each?
-        ranks_in_ann = []
+        ranks_in_ann: list[int | None] = []
         for mem_id in brute_top_10_ids:
             if mem_id in ann_id_set:
                 rank = ann_ids.index(mem_id) + 1  # 1-indexed

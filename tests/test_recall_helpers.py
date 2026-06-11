@@ -1,9 +1,9 @@
-"""Tests for multi-level recall helpers: recall_user_profile, recall_session_context, recall_agent_knowledge."""
+"""Tests for multi-level recall helpers: recall_user_profile, recall_session_context, recall_agent_knowledge."""  # noqa: E501
 
 import pytest
 
 from kemi import Memory
-from kemi.models import LifecycleState, MemoryType
+from kemi.memory.model import LifecycleState, MemoryType
 
 
 @pytest.fixture

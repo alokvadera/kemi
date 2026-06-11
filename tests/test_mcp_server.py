@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kemi.models import LifecycleState, MemoryType
+from kemi.memory.model import LifecycleState, MemoryType
 
 # Skip entire module if mcp is not available
 try:
-    from kemi.mcp_server import KemiMCPServer
+    from kemi.interfaces.mcp import KemiMCPServer
 
     _MCP_AVAILABLE = True
 except ImportError:
@@ -169,7 +169,7 @@ class TestStreamableHTTP:
 
     def test_create_app_returns_none_without_starlette(self, server):
         """Test that create_app returns None when starlette is not available."""
-        with patch("kemi.mcp_server._HAS_STREAMABLE_HTTP", False):
+        with patch("kemi.interfaces.mcp._HAS_STREAMABLE_HTTP", False):
             app = server.create_app()
             assert app is None
 

@@ -16,7 +16,8 @@ from kemi.adapters.storage.sqlite_vec import (
     SQLiteVecStorageAdapter,
     _embedding_to_json,
 )
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
+from tests._helpers.factories import make_memory
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,12 +36,11 @@ def _make_memory(
     """Create a MemoryObject with sensible defaults."""
     if embedding is None:
         embedding = [0.1] * 384
-    return MemoryObject(
+    return make_memory(
         memory_id=memory_id,
         user_id=user_id,
         content=content,
         embedding=embedding,
-        score=0.0,
         created_at=datetime.now(timezone.utc),
         last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,

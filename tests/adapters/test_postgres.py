@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from kemi.adapters.storage.postgres import PostgresStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 
 def _pgvector_available() -> bool:
@@ -40,7 +40,7 @@ def _pg_available() -> bool:
     try:
         import psycopg
 
-        with psycopg.connect(dsn, connect_timeout=3) as conn:
+        with psycopg.connect(dsn, connect_timeout=3):
             return True
     except Exception:
         return False
@@ -237,9 +237,9 @@ def test_get_all_by_user(postgres_adapter: PostgresStorageAdapter) -> None:
 
 @skip_if_no_pg
 def test_get_all_by_user_lifecycle_filter(postgres_adapter: PostgresStorageAdapter) -> None:
-    postgres_adapter.store(_make_memory("id1", "alice", "active mem", lifecycle_state=LifecycleState.ACTIVE))
-    postgres_adapter.store(_make_memory("id2", "alice", "decaying mem", lifecycle_state=LifecycleState.DECAYING))
-    postgres_adapter.store(_make_memory("id3", "alice", "deleted mem", lifecycle_state=LifecycleState.DELETED))
+    postgres_adapter.store(_make_memory("id1", "alice", "active mem", lifecycle_state=LifecycleState.ACTIVE))  # noqa: E501
+    postgres_adapter.store(_make_memory("id2", "alice", "decaying mem", lifecycle_state=LifecycleState.DECAYING))  # noqa: E501
+    postgres_adapter.store(_make_memory("id3", "alice", "deleted mem", lifecycle_state=LifecycleState.DELETED))  # noqa: E501
 
     active_only = postgres_adapter.get_all_by_user(
         "alice", lifecycle_filter=[LifecycleState.ACTIVE]
@@ -276,7 +276,7 @@ def test_tags_roundtrip(postgres_adapter: PostgresStorageAdapter) -> None:
 def test_get_by_tag(postgres_adapter: PostgresStorageAdapter) -> None:
     postgres_adapter.store(_make_memory("id1", "alice", "I love cats", tags=["pet", "cat"]))
     postgres_adapter.store(_make_memory("id2", "alice", "I work in tech", tags=["work"]))
-    postgres_adapter.store(_make_memory("id3", "alice", "Cat adoption story", tags=["pet", "cat", "adoption"]))
+    postgres_adapter.store(_make_memory("id3", "alice", "Cat adoption story", tags=["pet", "cat", "adoption"]))  # noqa: E501
 
     results = postgres_adapter.get_by_tag("alice", "cat")
     assert len(results) == 2
@@ -287,7 +287,7 @@ def test_get_by_tag(postgres_adapter: PostgresStorageAdapter) -> None:
 def test_get_by_tag_no_false_positives(postgres_adapter: PostgresStorageAdapter) -> None:
     """Searching for 'cat' should not match 'category'."""
     postgres_adapter.store(_make_memory("id1", "alice", "I have a pet cat", tags=["pet", "cat"]))
-    postgres_adapter.store(_make_memory("id2", "alice", "I work in the category industry", tags=["work", "category"]))
+    postgres_adapter.store(_make_memory("id2", "alice", "I work in the category industry", tags=["work", "category"]))  # noqa: E501
 
     results = postgres_adapter.get_by_tag("alice", "cat")
     assert len(results) == 1
@@ -313,8 +313,8 @@ def test_search_returns_results(postgres_adapter: PostgresStorageAdapter) -> Non
 
 @skip_if_no_pg
 def test_search_lifecycle_filter(postgres_adapter: PostgresStorageAdapter) -> None:
-    postgres_adapter.store(_make_memory("id1", "user1", "active memory", embedding=[1.0] * 64, lifecycle_state=LifecycleState.ACTIVE))
-    postgres_adapter.store(_make_memory("id2", "user1", "deleted memory", embedding=[1.0] * 64, lifecycle_state=LifecycleState.DELETED))
+    postgres_adapter.store(_make_memory("id1", "user1", "active memory", embedding=[1.0] * 64, lifecycle_state=LifecycleState.ACTIVE))  # noqa: E501
+    postgres_adapter.store(_make_memory("id2", "user1", "deleted memory", embedding=[1.0] * 64, lifecycle_state=LifecycleState.DELETED))  # noqa: E501
 
     results = postgres_adapter.search("user1", [1.0] * 64, top_k=10)
     assert all(m.lifecycle_state != LifecycleState.DELETED for m in results)
@@ -322,8 +322,8 @@ def test_search_lifecycle_filter(postgres_adapter: PostgresStorageAdapter) -> No
 
 @skip_if_no_pg
 def test_search_namespace_filter(postgres_adapter: PostgresStorageAdapter) -> None:
-    postgres_adapter.store(_make_memory("id1", "alice", "default ns", namespace="default", embedding=[1.0] * 64))
-    postgres_adapter.store(_make_memory("id2", "alice", "work ns", namespace="work", embedding=[1.0] * 64))
+    postgres_adapter.store(_make_memory("id1", "alice", "default ns", namespace="default", embedding=[1.0] * 64))  # noqa: E501
+    postgres_adapter.store(_make_memory("id2", "alice", "work ns", namespace="work", embedding=[1.0] * 64))  # noqa: E501
 
     results = postgres_adapter.search("alice", [1.0] * 64, namespace="work")
     assert all(m.namespace == "work" for m in results)
@@ -375,7 +375,7 @@ def test_search_by_content_no_results(postgres_adapter: PostgresStorageAdapter) 
 
 @skip_if_no_pg
 def test_search_hybrid(postgres_adapter: PostgresStorageAdapter) -> None:
-    postgres_adapter.store(_make_memory("id1", "alice", "I love Python programming", embedding=[1.0] * 64))
+    postgres_adapter.store(_make_memory("id1", "alice", "I love Python programming", embedding=[1.0] * 64))  # noqa: E501
     postgres_adapter.store(_make_memory("id2", "alice", "I love hiking", embedding=[0.1] * 64))
 
     results = postgres_adapter.search_hybrid(
@@ -436,7 +436,7 @@ def test_source_roundtrip(postgres_adapter: PostgresStorageAdapter) -> None:
 
 @skip_if_no_pg
 def test_memory_type_roundtrip(postgres_adapter: PostgresStorageAdapter) -> None:
-    from kemi.models import MemoryType
+    from kemi.memory.model import MemoryType
 
     mem = _make_memory("test-id", "user1", "test", memory_type="semantic")
     postgres_adapter.store(mem)

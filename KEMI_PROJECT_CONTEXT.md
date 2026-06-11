@@ -1,10 +1,17 @@
 # Kemi — Full Project Context
 
+> **⚠️ Outdated Layout Notice:** This document describes the pre-Phase-12
+> flat module layout (`kemi/scoring.py`, `kemi/webhooks.py`, etc.).  In
+> Phase 12 the codebase was reorganised into subpackages (`memory/`,
+> `infra/`, `interfaces/`, `nlp/`, `operations/`, `adapters/`, etc.).
+> See `docs/ARCHITECTURE.md` and `docs/phase12_layout.md` for the
+> authoritative post-reorg map.
+
 ## Project Overview
 
 **kemi** is a Python library for persistent memory in AI agents. Tagline: "Persistent memory for AI agents. Three methods. Zero infra."
 
-- PyPI package: `kemi` (version 0.3.0)
+- PyPI package: `kemi` (version 0.4.0)
 - License: MIT
 - Python: 3.10+
 - Author: Vadera Alok

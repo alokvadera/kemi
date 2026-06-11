@@ -23,21 +23,20 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kemi.models import (
+from kemi.memory.model import (
     LifecycleState,
     MemoryObject,
     MemorySource,
     MemoryType,
 )
-from kemi.versions import (
-    DiffResult,
+from kemi.memory.versions import (
     MemoryVersionStore,
-    RollbackResult,
-    VersionSnapshot,
     _pack_embedding,
     _unpack_embedding,
-    diff_memories,
 )
+from tests._helpers.factories import make_memory
+
+pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------
@@ -58,12 +57,11 @@ def _make_memory(
     confidence: float = 1.0,
 ) -> MemoryObject:
     now = datetime.now(timezone.utc)
-    return MemoryObject(
+    return make_memory(
         memory_id=memory_id,
         user_id=user_id,
         content=content,
         embedding=[0.1, 0.2, 0.3],
-        score=0.0,
         created_at=now,
         last_accessed_at=now,
         source=MemorySource.USER_STATED,
@@ -487,7 +485,6 @@ class TestFallbackVersionStore:
         work (in-memory) and return an empty list for unknown IDs."""
         from kemi import Memory
         from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
-        from kemi.models import MemoryObject
 
         class BareStore(StorageAdapter):
             """Storage adapter with no _db_path at all."""

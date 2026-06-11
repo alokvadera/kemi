@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kemi.models import LifecycleState
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import LifecycleState
 
 
 def _sklearn_available() -> bool:
@@ -23,15 +24,15 @@ SKLEARN_SKIP = pytest.mark.skipif(not _sklearn_available(), reason="sklearn not 
 class TestClusterMemories:
     @SKLEARN_SKIP
     def test_cluster_memories_requires_sklearn(self):
-        from kemi import topics
+        from kemi.nlp import topics
 
         with patch.object(topics, "_sklearn_available", return_value=False):
-            with pytest.raises(ImportError, match="scikit-learn"):
+            with pytest.raises(ConfigurationError, match="scikit-learn"):
                 topics.cluster_memories(MagicMock(), "alice")
 
     @SKLEARN_SKIP
     def test_cluster_memories_less_than_2_with_embeddings(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         mem = MagicMock()
@@ -39,25 +40,25 @@ class TestClusterMemories:
         mem.lifecycle_state = LifecycleState.ACTIVE
         mock_store.get_all_by_user.return_value = [mem]
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             with patch("sklearn.cluster.KMeans"):
                 result = cluster_memories(mock_store, "alice", n_clusters=3)
                 assert "topic_0" in result
 
     @SKLEARN_SKIP
     def test_cluster_memories_no_memories(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         mock_store.get_all_by_user.return_value = []
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             result = cluster_memories(mock_store, "alice")
             assert result == {}
 
     @SKLEARN_SKIP
     def test_cluster_memories_single_memory(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         mem = MagicMock()
@@ -65,14 +66,14 @@ class TestClusterMemories:
         mem.lifecycle_state = LifecycleState.ACTIVE
         mock_store.get_all_by_user.return_value = [mem]
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             with patch("sklearn.cluster.KMeans"):
                 result = cluster_memories(mock_store, "alice")
                 assert "topic_0" in result
 
     @SKLEARN_SKIP
     def test_cluster_memories_k_capped_to_memory_count(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         memories = []
@@ -83,7 +84,7 @@ class TestClusterMemories:
             memories.append(mem)
         mock_store.get_all_by_user.return_value = memories
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             mock_kmeans = MagicMock()
             mock_kmeans.fit_predict.return_value = [0, 1, 0]
             with patch("sklearn.cluster.KMeans", return_value=mock_kmeans):
@@ -93,7 +94,7 @@ class TestClusterMemories:
 
     @SKLEARN_SKIP
     def test_cluster_memories_filters_memories_without_embeddings(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         mem_with_emb = MagicMock()
@@ -104,7 +105,7 @@ class TestClusterMemories:
         mem_without_emb.lifecycle_state = LifecycleState.ACTIVE
         mock_store.get_all_by_user.return_value = [mem_with_emb, mem_without_emb]
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             mock_kmeans = MagicMock()
             mock_kmeans.fit_predict.return_value = [0]
             with patch("sklearn.cluster.KMeans", return_value=mock_kmeans):
@@ -115,7 +116,7 @@ class TestClusterMemories:
 
     @SKLEARN_SKIP
     def test_cluster_memories_kmeans_failure_falls_back(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         mem1 = MagicMock()
@@ -126,7 +127,7 @@ class TestClusterMemories:
         mem2.lifecycle_state = LifecycleState.ACTIVE
         mock_store.get_all_by_user.return_value = [mem1, mem2]
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             with patch(
                 "sklearn.cluster.KMeans",
                 side_effect=Exception("KMeans failed"),
@@ -137,7 +138,7 @@ class TestClusterMemories:
 
     @SKLEARN_SKIP
     def test_cluster_memories_sorted_by_size(self):
-        from kemi.topics import cluster_memories
+        from kemi.nlp.topics import cluster_memories
 
         mock_store = MagicMock()
         memories = []
@@ -148,7 +149,7 @@ class TestClusterMemories:
             memories.append(mem)
         mock_store.get_all_by_user.return_value = memories
 
-        with patch("kemi.topics._sklearn_available", return_value=True):
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
             mock_kmeans = MagicMock()
             # 2 in cluster 0, 1 in cluster 1, 1 in cluster 2
             mock_kmeans.fit_predict.return_value = [0, 0, 1, 2]
@@ -161,7 +162,7 @@ class TestClusterMemories:
 
 class TestGenerateTopicLabel:
     def test_generates_label_from_top_words(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem1 = MagicMock()
         mem1.content = "Python programming is great and python is fun"
@@ -173,7 +174,7 @@ class TestGenerateTopicLabel:
         assert label != "Topic 1"
 
     def test_fallback_when_all_words_filtered(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "the a is are and but or"
@@ -182,7 +183,7 @@ class TestGenerateTopicLabel:
         assert label == "Topic 1"
 
     def test_single_memory_single_word(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "kubernetes orchestration"
@@ -191,7 +192,7 @@ class TestGenerateTopicLabel:
         assert "kubernetes" in label.lower() or "orchestration" in label.lower()
 
     def test_index_offset_in_label(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "machine learning neural networks deep"
@@ -201,7 +202,7 @@ class TestGenerateTopicLabel:
         assert "machine" in label.lower() or "learning" in label.lower()
 
     def test_stopwords_filtered(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "the category sat on the mattress and the dog ran quickly"
@@ -213,7 +214,7 @@ class TestGenerateTopicLabel:
         assert "category" in label.lower() or "mattress" in label.lower()
 
     def test_punctuation_stripped(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "python!!! python?? python,, python..."
@@ -222,7 +223,7 @@ class TestGenerateTopicLabel:
         assert "python" in label.lower()
 
     def test_short_words_filtered(self):
-        from kemi.topics import _generate_topic_label
+        from kemi.nlp.topics import _generate_topic_label
 
         mem = MagicMock()
         mem.content = "a b c d e f g hi there python"
@@ -230,3 +231,42 @@ class TestGenerateTopicLabel:
         label = _generate_topic_label([mem], 0)
         # Only "there" and "python" are > 3 chars
         assert label != "Topic 1"
+
+    def test_empty_list_fallback(self):
+        from kemi.nlp.topics import _generate_topic_label
+
+        label = _generate_topic_label([], 3)
+        assert label == "Topic 4"
+
+
+class TestClusterMemoriesEdgeCases:
+    @SKLEARN_SKIP
+    def test_cluster_memories_with_namespace(self):
+        from kemi.nlp.topics import cluster_memories
+
+        mock_store = MagicMock()
+        mem = MagicMock()
+        mem.embedding = [0.1, 0.2]
+        mem.lifecycle_state = LifecycleState.ACTIVE
+        mock_store.get_all_by_user.return_value = [mem]
+
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
+            with patch("sklearn.cluster.KMeans"):
+                result = cluster_memories(mock_store, "alice", namespace="work")
+                assert "topic_0" in result
+                call_kwargs = mock_store.get_all_by_user.call_args.kwargs
+                assert call_kwargs["namespace"] == "work"
+
+    @SKLEARN_SKIP
+    def test_cluster_memories_all_without_embeddings(self):
+        from kemi.nlp.topics import cluster_memories
+
+        mock_store = MagicMock()
+        mem = MagicMock()
+        mem.embedding = None
+        mem.lifecycle_state = LifecycleState.ACTIVE
+        mock_store.get_all_by_user.return_value = [mem]
+
+        with patch("kemi.nlp.topics._sklearn_available", return_value=True):
+            result = cluster_memories(mock_store, "alice")
+            assert result == {}

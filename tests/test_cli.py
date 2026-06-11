@@ -1,3 +1,5 @@
+from tests._helpers.factories import make_memory
+
 """Integration tests for kemi CLI commands.
 
 Tests the handler functions directly with mocked Memory instances.
@@ -10,6 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
+pytestmark = pytest.mark.slow
+
 # scikit-learn is an optional dependency for topic clustering
 try:
     import sklearn  # noqa: F401
@@ -19,7 +23,7 @@ except ImportError:
     _SKLEARN_AVAILABLE = False
 
 from kemi import Memory
-from kemi.cli import (
+from kemi.interfaces.cli import (
     consolidate_memories,
     explain_memories,
     get_memory,
@@ -30,13 +34,13 @@ from kemi.cli import (
     topics_memories,
     update_memory,
 )
-from kemi.models import LifecycleState, MemoryObject, MemoryType
+from kemi.memory.model import LifecycleState, MemoryType
 
 
 @pytest.fixture
 def _patch_get_memory(mock_memory: Memory):
-    """Patch kemi.cli.get_memory to return the mock_memory fixture."""
-    with patch("kemi.cli.get_memory", return_value=mock_memory):
+    """Patch kemi.interfaces.cli.get_memory to return the mock_memory fixture."""
+    with patch("kemi.interfaces.cli.main.get_memory", return_value=mock_memory):
         yield
 
 
@@ -46,7 +50,7 @@ class TestCLIPrune:
     def test_prune_by_age(self, _patch_get_memory, mock_memory: Memory, capsys):
         """prune --max-age-days deletes old memories."""
         old_time = datetime.now(timezone.utc) - timedelta(days=100)
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="old-1",
             user_id="user1",
             content="old memory",
@@ -67,7 +71,7 @@ class TestCLIPrune:
 
     def test_prune_by_importance(self, _patch_get_memory, mock_memory: Memory, capsys):
         """prune --min-importance deletes low-importance memories."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="low-1",
             user_id="user1",
             content="low importance",
@@ -98,16 +102,15 @@ class TestCLIPrune:
     def test_prune_with_namespace(self, _patch_get_memory, mock_memory: Memory, capsys):
         """prune --namespace only affects the given namespace."""
         old_time = datetime.now(timezone.utc) - timedelta(days=100)
-        mem_default = MemoryObject(
+        mem_default = make_memory(
             memory_id="old-default",
             user_id="user1",
             content="old default",
             created_at=old_time,
             last_accessed_at=old_time,
             lifecycle_state=LifecycleState.DECAYING,
-            namespace="default",
         )
-        mem_other = MemoryObject(
+        mem_other = make_memory(
             memory_id="old-other",
             user_id="user1",
             content="old other",
@@ -137,7 +140,7 @@ class TestCLIConsolidate:
         """consolidate creates a semantic summary from old episodic memories."""
         old_time = datetime.now(timezone.utc) - timedelta(days=60)
         for i in range(5):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"ep-{i}",
                 user_id="user1",
                 content=f"I visited Paris on day {i}",
@@ -169,7 +172,7 @@ class TestCLIConsolidate:
         """consolidate --namespace only consolidates memories in that namespace."""
         old_time = datetime.now(timezone.utc) - timedelta(days=60)
         for i in range(5):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"ep-ns-{i}",
                 user_id="user1",
                 content=f"I visited Tokyo day {i}",
@@ -203,7 +206,7 @@ class TestCLITopics:
             "I ran a marathon last year",
         ]
         for i, content in enumerate(contents):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"topic-{i}",
                 user_id="user1",
                 content=content,
@@ -212,7 +215,7 @@ class TestCLITopics:
             )
             mock_memory._store.store(mem)
 
-        with patch("kemi.cli.sys.exit") as mock_exit:
+        with patch("kemi.interfaces.cli.main.sys.exit") as mock_exit:
             topics_memories(argparse.Namespace(user_id="user1", n_clusters=2, namespace="default"))
             assert not mock_exit.called
 
@@ -228,7 +231,7 @@ class TestCLITopics:
 
     def test_topics_import_error(self, _patch_get_memory, mock_memory: Memory):
         """topics without scikit-learn prints error and exits."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="topic-0",
             user_id="user1",
             content="some memory",
@@ -237,8 +240,8 @@ class TestCLITopics:
         )
         mock_memory._store.store(mem)
 
-        with patch("kemi.cli.Memory.cluster_topics", side_effect=ImportError("No sklearn")):
-            with patch("kemi.cli.sys.exit") as mock_exit:
+        with patch("kemi.interfaces.cli.main.Memory.cluster_topics", side_effect=ImportError("No sklearn")):  # noqa: E501
+            with patch("kemi.interfaces.cli.main.sys.exit") as mock_exit:
                 topics_memories(
                     argparse.Namespace(user_id="user1", n_clusters=3, namespace="default")
                 )
@@ -250,7 +253,7 @@ class TestCLIGraph:
 
     def test_graph_entities_and_relations(self, _patch_get_memory, mock_memory: Memory, capsys):
         """graph prints extracted entities and relations."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="graph-1",
             user_id="user1",
             content="Alice works at Google and Bob lives in London.",
@@ -275,7 +278,7 @@ class TestCLIGraph:
 
     def test_graph_with_namespace(self, _patch_get_memory, mock_memory: Memory, capsys):
         """graph --namespace only uses memories in that namespace."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="graph-ns",
             user_id="user1",
             content="Charlie studies at MIT",
@@ -295,7 +298,7 @@ class TestCLIE2E:
 
     def test_update_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """update with valid args through main() updates the memory."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-upd",
             user_id="user1",
             content="original",
@@ -312,7 +315,7 @@ class TestCLIE2E:
 
     def test_recall_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """recall with valid args through main() finds memories."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-rec",
             user_id="user1",
             content="I love Python programming",
@@ -327,7 +330,7 @@ class TestCLIE2E:
 
     def test_stats_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """stats with valid args through main() shows statistics."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-stat",
             user_id="user1",
             content="stats test",
@@ -335,7 +338,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
         )
         mock_memory._store.store(mem)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "stats", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -344,7 +347,7 @@ class TestCLIE2E:
 
     def test_list_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list with valid args through main() lists memories."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-list",
             user_id="user1",
             content="list me",
@@ -352,7 +355,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
         )
         mock_memory._store.store(mem)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "list", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -361,15 +364,14 @@ class TestCLIE2E:
 
     def test_list_namespace_filter(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list --namespace filters results by namespace."""
-        ns_default = MemoryObject(
+        ns_default = make_memory(
             memory_id="e2e-list-ns-default",
             user_id="user1",
             content="default ns memory",
             embedding=mock_memory._embed.embed_single("default ns memory"),
             embedding_dim=mock_memory._embed.dimension(),
-            namespace="default",
         )
-        ns_travel = MemoryObject(
+        ns_travel = make_memory(
             memory_id="e2e-list-ns-travel",
             user_id="user1",
             content="travel ns memory",
@@ -379,7 +381,7 @@ class TestCLIE2E:
         )
         mock_memory._store.store(ns_default)
         mock_memory._store.store(ns_travel)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "list", "user1", "--namespace", "travel"]):
                 main()
         captured = capsys.readouterr()
@@ -389,7 +391,7 @@ class TestCLIE2E:
 
     def test_list_lifecycle_filter(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list --lifecycle-filter filters results by state."""
-        active_mem = MemoryObject(
+        active_mem = make_memory(
             memory_id="e2e-list-lc-active",
             user_id="user1",
             content="active memory",
@@ -397,7 +399,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
             lifecycle_state=LifecycleState.ACTIVE,
         )
-        decaying_mem = MemoryObject(
+        decaying_mem = make_memory(
             memory_id="e2e-list-lc-decaying",
             user_id="user1",
             content="decaying memory",
@@ -407,7 +409,7 @@ class TestCLIE2E:
         )
         mock_memory._store.store(active_mem)
         mock_memory._store.store(decaying_mem)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys, "argv", ["kemi", "list", "user1", "--lifecycle-filter", "decaying"]
             ):
@@ -419,7 +421,7 @@ class TestCLIE2E:
 
     def test_list_session_id_filter(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list --session-id filters results by session."""
-        session_a = MemoryObject(
+        session_a = make_memory(
             memory_id="e2e-list-si-a",
             user_id="user1",
             content="session A memory",
@@ -427,7 +429,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
             session_id="session-a",
         )
-        session_b = MemoryObject(
+        session_b = make_memory(
             memory_id="e2e-list-si-b",
             user_id="user1",
             content="session B memory",
@@ -437,7 +439,7 @@ class TestCLIE2E:
         )
         mock_memory._store.store(session_a)
         mock_memory._store.store(session_b)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "list", "user1", "--session-id", "session-a"]):
                 main()
         captured = capsys.readouterr()
@@ -447,7 +449,7 @@ class TestCLIE2E:
 
     def test_list_lifecycle_filter_multiple(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list --lifecycle-filter with comma-separated states."""
-        active_mem = MemoryObject(
+        active_mem = make_memory(
             memory_id="e2e-list-lc2-active",
             user_id="user1",
             content="active memory",
@@ -455,7 +457,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
             lifecycle_state=LifecycleState.ACTIVE,
         )
-        decaying_mem = MemoryObject(
+        decaying_mem = make_memory(
             memory_id="e2e-list-lc2-decaying",
             user_id="user1",
             content="decaying memory",
@@ -465,7 +467,7 @@ class TestCLIE2E:
         )
         mock_memory._store.store(active_mem)
         mock_memory._store.store(decaying_mem)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -479,7 +481,7 @@ class TestCLIE2E:
 
     def test_list_users_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """list-users through main() lists users with counts."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-lu",
             user_id="alice",
             content="alice memory",
@@ -487,7 +489,7 @@ class TestCLIE2E:
             embedding_dim=mock_memory._embed.dimension(),
         )
         mock_memory._store.store(mem)
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "list-users"]):
                 main()
         captured = capsys.readouterr()
@@ -495,7 +497,7 @@ class TestCLIE2E:
 
     def test_forget_through_main_cancelled(self, _patch_get_memory, mock_memory: Memory, capsys):
         """forget through main() cancels when user types n."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-forget",
             user_id="user1",
             content="to be deleted",
@@ -513,7 +515,7 @@ class TestCLIE2E:
 
     def test_forget_through_main_confirmed(self, _patch_get_memory, mock_memory: Memory, capsys):
         """forget through main() deletes when user types y."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-forget2",
             user_id="user1",
             content="to be deleted",
@@ -531,7 +533,7 @@ class TestCLIE2E:
     def test_prune_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """prune with valid args through main() removes old memories."""
         old_time = datetime.now(timezone.utc) - timedelta(days=100)
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-prune",
             user_id="user1",
             content="old pruneable",
@@ -550,7 +552,7 @@ class TestCLIE2E:
         """consolidate through main() creates summary memories."""
         old_time = datetime.now(timezone.utc) - timedelta(days=60)
         for i in range(5):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"e2e-cons-{i}",
                 user_id="user1",
                 content=f"Paris day {i}",
@@ -568,7 +570,7 @@ class TestCLIE2E:
 
     def test_graph_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """graph through main() extracts entities and relations."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-graph",
             user_id="user1",
             content="Sarah lives in Berlin and works at Tesla.",
@@ -584,7 +586,7 @@ class TestCLIE2E:
 
     def test_explain_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """explain through main() shows score breakdowns."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-exp",
             user_id="user1",
             content="I enjoy hiking in mountains",
@@ -600,7 +602,7 @@ class TestCLIE2E:
 
     def test_export_through_main(self, _patch_get_memory, mock_memory: Memory, tmp_path):
         """export through main() writes memories to a file."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-exp-file",
             user_id="user1",
             content="export me",
@@ -620,7 +622,7 @@ class TestCLIE2E:
 
     def test_recall_stream_through_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """recall-stream through main() streams memories progressively."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="e2e-stream",
             user_id="user1",
             content="I love Python programming",
@@ -664,7 +666,7 @@ class TestCLIE2E:
                 ],
                 f,
             )
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(sys, "argv", ["kemi", "import", in_file]):
                 main()
         captured = capsys.readouterr()
@@ -678,8 +680,8 @@ class TestCLIHooksRaiseOnError:
 
     def test_get_memory_with_hooks_raise_on_error_true(self):
         """get_memory(args) with flag=True creates Memory with hooks_raise_on_error=True."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
-            with patch("kemi.cli.Memory") as mock_mem_cls:
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
+            with patch("kemi.interfaces.cli.main.Memory") as mock_mem_cls:
                 args = argparse.Namespace(hooks_raise_on_error=True)
                 get_memory(args)
                 mock_mem_cls.assert_called_once()
@@ -688,8 +690,8 @@ class TestCLIHooksRaiseOnError:
 
     def test_get_memory_with_hooks_raise_on_error_false(self):
         """get_memory(args) with flag=False creates Memory with hooks_raise_on_error=False."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
-            with patch("kemi.cli.Memory") as mock_mem_cls:
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
+            with patch("kemi.interfaces.cli.main.Memory") as mock_mem_cls:
                 args = argparse.Namespace(hooks_raise_on_error=False)
                 get_memory(args)
                 mock_mem_cls.assert_called_once()
@@ -698,8 +700,8 @@ class TestCLIHooksRaiseOnError:
 
     def test_get_memory_without_flag_uses_default(self):
         """get_memory(args) without flag uses default Memory() (no config override)."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
-            with patch("kemi.cli.Memory") as mock_mem_cls:
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
+            with patch("kemi.interfaces.cli.main.Memory") as mock_mem_cls:
                 args = argparse.Namespace(hooks_raise_on_error=None)
                 get_memory(args)
                 mock_mem_cls.assert_called_once()
@@ -723,7 +725,7 @@ class TestCLIExplain:
 
     def test_explain_scores(self, _patch_get_memory, mock_memory: Memory, capsys):
         """explain prints memories with score breakdowns."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="explain-1",
             user_id="user1",
             content="I enjoy hiking in the mountains",
@@ -755,7 +757,7 @@ class TestCLIExplain:
 
     def test_explain_with_namespace(self, _patch_get_memory, mock_memory: Memory, capsys):
         """explain --namespace filters by namespace."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="explain-ns",
             user_id="user1",
             content="I love coding in Python",
@@ -776,9 +778,9 @@ class TestCLIExplain:
 class TestCLIRecallStream:
     """Tests for the recall-stream CLI command."""
 
-    def test_recall_stream_prints_progressively(self, _patch_get_memory, mock_memory: Memory, capsys):
+    def test_recall_stream_prints_progressively(self, _patch_get_memory, mock_memory: Memory, capsys):  # noqa: E501
         """recall-stream prints each memory as it arrives."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="stream-1",
             user_id="user1",
             content="I love Python",
@@ -806,7 +808,7 @@ class TestCLIRecallStream:
         """recall-stream shows all results with correct numbering."""
         contents = ["first memory", "second memory", "third memory"]
         for i, content in enumerate(contents):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"stream-{i}",
                 user_id="user1",
                 content=content,
@@ -860,7 +862,7 @@ class TestCLIRealDB:
 
     def test_store_with_metadata(self, real_db_memory: Memory, capsys):
         """store --metadata persists metadata as JSON."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -881,7 +883,7 @@ class TestCLIRealDB:
 
     def test_store_with_tags(self, real_db_memory: Memory, capsys):
         """store --tags persists comma-separated tags."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -901,7 +903,7 @@ class TestCLIRealDB:
     def test_store_and_recall_metadata_round_trip(self, real_db_memory: Memory, capsys):
         """store --metadata then recall --metadata-filter in a full round-trip."""
         # Step 1: Store a memory with metadata via the CLI
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -915,7 +917,7 @@ class TestCLIRealDB:
         assert "Stored memory:" in captured.out
 
         # Step 2: Recall with metadata filter matching the stored metadata
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -937,7 +939,7 @@ class TestCLIRealDB:
         --metadata-filter returns it and the tags are correctly persisted.
         """
         # Step 1: Store a memory with both --tags and --metadata
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -959,7 +961,7 @@ class TestCLIRealDB:
         assert stored.metadata == {"source": "test", "category": "personal"}
 
         # Step 2: Recall with --metadata-filter — should find the memory
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -975,7 +977,7 @@ class TestCLIRealDB:
         assert "Score:" in captured.out
 
         # Step 3: Store a second memory with different tags/metadata that shouldn't match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -990,7 +992,7 @@ class TestCLIRealDB:
         assert "Stored memory:" in captured.out
 
         # Step 4: Recall with --metadata-filter matching only the first memory
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1004,14 +1006,14 @@ class TestCLIRealDB:
         assert "I visited Tokyo last spring" in captured.out
         assert "Python programming" not in captured.out
 
-    def test_store_with_tags_and_recall_stream_metadata_filter(self, real_db_memory: Memory, capsys):
+    def test_store_with_tags_and_recall_stream_metadata_filter(self, real_db_memory: Memory, capsys):  # noqa: E501
         """store --tags and --metadata, then recall-stream --metadata-filter finds it.
 
         Stores memories with both tags and metadata, then uses recall-stream
         with --metadata-filter to verify the full round-trip pipeline.
         """
         # Step 1: Store a memory with both --tags and --metadata
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1033,7 +1035,7 @@ class TestCLIRealDB:
         assert stored.metadata == {"source": "test", "category": "personal"}
 
         # Step 2: recall-stream with --metadata-filter — should find the memory
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1049,7 +1051,7 @@ class TestCLIRealDB:
         assert "Streamed 1 result(s)" in captured.out
 
         # Step 3: Store a second memory with different tags/metadata
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1063,7 +1065,7 @@ class TestCLIRealDB:
         capsys.readouterr()  # discard store output
 
         # Step 4: recall-stream with --metadata-filter matching only the first
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1081,7 +1083,7 @@ class TestCLIRealDB:
 
     def test_store_with_session_id(self, real_db_memory: Memory, capsys):
         """store --session-id persists the session ID."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1100,7 +1102,7 @@ class TestCLIRealDB:
 
     def test_store_with_session_id_and_namespace(self, real_db_memory: Memory, capsys):
         """store --session-id combined with --namespace persists both fields."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1121,7 +1123,7 @@ class TestCLIRealDB:
 
     def test_store_with_namespace_and_tags(self, real_db_memory: Memory, capsys):
         """store --namespace combined with --tags persists both fields."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1142,7 +1144,7 @@ class TestCLIRealDB:
 
     def test_store_with_tags_and_session_id(self, real_db_memory: Memory, capsys):
         """store --tags combined with --session-id persists both fields."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1163,7 +1165,7 @@ class TestCLIRealDB:
 
     def test_store_with_tags_metadata_and_session_id(self, real_db_memory: Memory, capsys):
         """store --tags combined with --metadata and --session-id persists all three fields."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1187,7 +1189,7 @@ class TestCLIRealDB:
     def test_forget_with_memory_id(self, real_db_memory: Memory, capsys):
         """forget --memory-id deletes a specific memory."""
         mem_id = real_db_memory.remember("user1", "memory to forget")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1200,7 +1202,7 @@ class TestCLIRealDB:
 
     def test_forget_with_memory_id_not_found(self, real_db_memory: Memory, capsys):
         """forget --memory-id with nonexistent ID prints 0."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1217,28 +1219,35 @@ class TestCLIRealDB:
         embeddings can trigger the 0.85 dedup threshold).
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(
-                memory_id="fm-1", user_id="user1", content="alpha brand content",
+            make_memory(
+                memory_id="fm-1",
+                user_id="user1",
+                content="alpha brand content",
                 embedding=embed.embed_single("alpha brand content"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="fm-2", user_id="user1", content="beta random stuff",
+            make_memory(
+                memory_id="fm-2",
+                user_id="user1",
+                content="beta random stuff",
                 embedding=embed.embed_single("beta random stuff"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="fm-3", user_id="user1", content="gamma extra data",
+            make_memory(
+                memory_id="fm-3",
+                user_id="user1",
+                content="gamma extra data",
                 embedding=embed.embed_single("gamma extra data"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -1249,7 +1258,7 @@ class TestCLIRealDB:
         for m in mems:
             real_db_memory._store.store(m)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1265,11 +1274,14 @@ class TestCLIRealDB:
     def test_forget_many_some_not_found(self, real_db_memory: Memory, capsys):
         """forget-many with some nonexistent IDs only deletes the found ones."""
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
-        mem = MemoryObject(
-            memory_id="fm-only", user_id="user1", content="only this one should be deleted",
+        mem = make_memory(
+            memory_id="fm-only",
+            user_id="user1",
+            content="only this one should be deleted",
             embedding=embed.embed_single("only this one should be deleted"),
             embedding_dim=embed.dimension(),
             created_at=datetime.now(timezone.utc),
@@ -1278,7 +1290,7 @@ class TestCLIRealDB:
         )
         real_db_memory._store.store(mem)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1291,7 +1303,7 @@ class TestCLIRealDB:
 
     def test_list_empty_user(self, real_db_memory: Memory, capsys):
         """list with no memories for user prints appropriate message."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "list", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -1299,7 +1311,7 @@ class TestCLIRealDB:
 
     def test_store_with_tags_shows_in_list_output(self, real_db_memory: Memory, capsys):
         """store --tags then list shows tags in the output."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1311,7 +1323,7 @@ class TestCLIRealDB:
                 main()
         capsys.readouterr()  # discard store output
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "list", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -1324,7 +1336,7 @@ class TestCLIRealDB:
     def test_store_with_tags_and_list_lifecycle_filter(self, real_db_memory: Memory, capsys):
         """store --tags then list --lifecycle-filter shows only matching tagged memories."""
         # Store an active memory with tags via CLI
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1334,7 +1346,7 @@ class TestCLIRealDB:
         capsys.readouterr()
 
         # Store a decaying tagged memory via CLI
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1352,7 +1364,7 @@ class TestCLIRealDB:
                 break
 
         # List with --lifecycle-filter decaying
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1375,12 +1387,15 @@ class TestCLIRealDB:
         even on short texts with no shared words).
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(
-                memory_id="ltf-1", user_id="user1", content="alpha items here",
+            make_memory(
+                memory_id="ltf-1",
+                user_id="user1",
+                content="alpha items here",
                 tags=["foo", "bar"],
                 embedding=embed.embed_single("alpha items here"),
                 embedding_dim=embed.dimension(),
@@ -1388,8 +1403,10 @@ class TestCLIRealDB:
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="ltf-2", user_id="user1", content="beta things here",
+            make_memory(
+                memory_id="ltf-2",
+                user_id="user1",
+                content="beta things here",
                 tags=["baz"],
                 embedding=embed.embed_single("beta things here"),
                 embedding_dim=embed.dimension(),
@@ -1397,8 +1414,10 @@ class TestCLIRealDB:
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="ltf-3", user_id="user1", content="untagged data",
+            make_memory(
+                memory_id="ltf-3",
+                user_id="user1",
+                content="untagged data",
                 tags=None,
                 embedding=embed.embed_single("untagged data"),
                 embedding_dim=embed.dimension(),
@@ -1411,7 +1430,7 @@ class TestCLIRealDB:
             real_db_memory._store.store(m)
 
         # List with --tags foo — should only match the first memory (has tag "foo")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1427,7 +1446,7 @@ class TestCLIRealDB:
         assert "foo, bar" in captured.out
 
         # List with --tags foo,baz — OR logic, should match both tagged memories
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1442,7 +1461,7 @@ class TestCLIRealDB:
     def test_list_with_memories(self, real_db_memory: Memory, capsys):
         """list shows stored memories with correct content and fields."""
         real_db_memory.remember("user1", "I love coding in Python", importance=0.8)
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "list", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -1455,7 +1474,7 @@ class TestCLIRealDB:
         """list --namespace only shows memories in that namespace."""
         real_db_memory.remember("user1", "default ns memory", namespace="default")
         real_db_memory.remember("user1", "travel ns memory", namespace="travel")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "list", "user1", "--namespace", "travel"]):
                 main()
         captured = capsys.readouterr()
@@ -1472,7 +1491,7 @@ class TestCLIRealDB:
         stored.lifecycle_state = LifecycleState.DECAYING
         real_db_memory._store.update(stored)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "list", "user1", "--lifecycle-filter", "decaying"]
             ):
@@ -1485,7 +1504,7 @@ class TestCLIRealDB:
         """list --session-id only shows memories from that session."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", session_id="session-a")
         real_db_memory.remember("user1", "Python programming is fun", session_id="session-b")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "list", "user1", "--session-id", "session-a"]
             ):
@@ -1498,7 +1517,7 @@ class TestCLIRealDB:
     def test_recall_finds_stored_memory(self, real_db_memory: Memory, capsys):
         """recall with valid args finds previously stored memories."""
         real_db_memory.remember("user1", "I visited Tokyo last spring")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "recall", "user1", "Tokyo"]):
                 main()
         captured = capsys.readouterr()
@@ -1509,7 +1528,7 @@ class TestCLIRealDB:
         """recall --namespace only searches within that namespace."""
         real_db_memory.remember("user1", "work project details", namespace="work")
         real_db_memory.remember("user1", "personal notes", namespace="personal")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "recall", "user1", "details", "--namespace", "work"]
             ):
@@ -1524,7 +1543,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "beta memory content")
         real_db_memory.remember("user1", "gamma memory content")
         # Query with exact text for deterministic hash match, limit to 1 result
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "recall", "user1", "content", "--top-k", "1"]
             ):
@@ -1545,7 +1564,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "personal note one", namespace="personal")
         real_db_memory.remember("user1", "personal note two", namespace="personal")
         # Query with --top-k 1 --namespace work — only 1 work memory should return
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1569,12 +1588,15 @@ class TestCLIRealDB:
         Should return at most 2 results, all from the test source.
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(
-                memory_id="tk-mf-1", user_id="user1", content="alpha test content one",
+            make_memory(
+                memory_id="tk-mf-1",
+                user_id="user1",
+                content="alpha test content one",
                 embedding=embed.embed_single("alpha test content one"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -1582,8 +1604,10 @@ class TestCLIRealDB:
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"source": "test"},
             ),
-            MemoryObject(
-                memory_id="tk-mf-2", user_id="user1", content="beta test content two",
+            make_memory(
+                memory_id="tk-mf-2",
+                user_id="user1",
+                content="beta test content two",
                 embedding=embed.embed_single("beta test content two"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -1591,8 +1615,10 @@ class TestCLIRealDB:
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"source": "test"},
             ),
-            MemoryObject(
-                memory_id="tk-mf-3", user_id="user1", content="gamma test content three",
+            make_memory(
+                memory_id="tk-mf-3",
+                user_id="user1",
+                content="gamma test content three",
                 embedding=embed.embed_single("gamma test content three"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -1600,8 +1626,10 @@ class TestCLIRealDB:
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"source": "test"},
             ),
-            MemoryObject(
-                memory_id="tk-mf-4", user_id="user1", content="delta other unrelated",
+            make_memory(
+                memory_id="tk-mf-4",
+                user_id="user1",
+                content="delta other unrelated",
                 embedding=embed.embed_single("delta other unrelated"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -1614,7 +1642,7 @@ class TestCLIRealDB:
             real_db_memory._store.store(m)
 
         # Query with --top-k 2 and --metadata-filter source=test
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1638,7 +1666,7 @@ class TestCLIRealDB:
         """recall --metadata-filter returns only matching memories."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", metadata={"source": "test"})
         real_db_memory.remember("user1", "Python programming is fun", metadata={"source": "other"})
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1657,7 +1685,7 @@ class TestCLIRealDB:
     def test_recall_metadata_filter_no_match(self, real_db_memory: Memory, capsys):
         """recall --metadata-filter with no match prints message."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", metadata={"source": "test"})
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1674,11 +1702,11 @@ class TestCLIRealDB:
         """recall --session-id returns only memories from that session."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", session_id="session-a")
         real_db_memory.remember("user1", "Python programming is fun", session_id="session-b")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall", "user1", "I visited Tokyo last spring", "--session-id", "session-a"],
+                ["kemi", "recall", "user1", "I visited Tokyo last spring", "--session-id", "session-a"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -1690,11 +1718,11 @@ class TestCLIRealDB:
     def test_recall_session_id_no_match(self, real_db_memory: Memory, capsys):
         """recall --session-id with no matching memories prints message."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", session_id="session-a")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall", "user1", "I visited Tokyo last spring", "--session-id", "nonexistent-session"],
+                ["kemi", "recall", "user1", "I visited Tokyo last spring", "--session-id", "nonexistent-session"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -1703,12 +1731,32 @@ class TestCLIRealDB:
     def test_recall_namespace_and_session_id(self, real_db_memory: Memory, capsys):
         """recall with both --namespace and --session-id combined."""
         # 4 memories across 2 namespaces and 2 session IDs
-        real_db_memory.remember("user1", "I visited Tokyo last spring", namespace="work", session_id="session-a")
-        real_db_memory.remember("user1", "Python programming is fun", namespace="personal", session_id="session-a")
-        real_db_memory.remember("user1", "Important meeting notes", namespace="work", session_id="session-b")
-        real_db_memory.remember("user1", "Weekend hiking trip", namespace="personal", session_id="session-b")
+        real_db_memory.remember(
+            "user1",
+            "I visited Tokyo last spring",
+            namespace="work",
+            session_id="session-a",
+        )
+        real_db_memory.remember(
+            "user1",
+            "Python programming is fun",
+            namespace="personal",
+            session_id="session-a",
+        )
+        real_db_memory.remember(
+            "user1",
+            "Important meeting notes",
+            namespace="work",
+            session_id="session-b",
+        )
+        real_db_memory.remember(
+            "user1",
+            "Weekend hiking trip",
+            namespace="personal",
+            session_id="session-b",
+        )
         # Query work namespace + session-a — only Tokyo should match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1736,45 +1784,58 @@ class TestCLIRealDB:
         the default 0.85 dedup threshold).
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         # 4 memories across 2 session IDs and 2 metadata values
-        mem1 = MemoryObject(
-            memory_id="si-mf-1", user_id="user1", content="I visited Tokyo last spring",
+        mem1 = make_memory(
+            memory_id="si-mf-1",
+            user_id="user1",
+            content="I visited Tokyo last spring",
             embedding=embed.embed_single("I visited Tokyo last spring"),
             embedding_dim=embed.dimension(),
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             lifecycle_state=LifecycleState.ACTIVE,
-            session_id="session-a", metadata={"source": "test"},
+            session_id="session-a",
+            metadata={"source": "test"},
         )
-        mem2 = MemoryObject(
-            memory_id="si-mf-2", user_id="user1", content="Python programming is fun",
+        mem2 = make_memory(
+            memory_id="si-mf-2",
+            user_id="user1",
+            content="Python programming is fun",
             embedding=embed.embed_single("Python programming is fun"),
             embedding_dim=embed.dimension(),
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             lifecycle_state=LifecycleState.ACTIVE,
-            session_id="session-b", metadata={"source": "other"},
+            session_id="session-b",
+            metadata={"source": "other"},
         )
-        mem3 = MemoryObject(
-            memory_id="si-mf-3", user_id="user1", content="Important meeting notes",
+        mem3 = make_memory(
+            memory_id="si-mf-3",
+            user_id="user1",
+            content="Important meeting notes",
             embedding=embed.embed_single("Important meeting notes"),
             embedding_dim=embed.dimension(),
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             lifecycle_state=LifecycleState.ACTIVE,
-            session_id="session-a", metadata={"source": "other"},
+            session_id="session-a",
+            metadata={"source": "other"},
         )
-        mem4 = MemoryObject(
-            memory_id="si-mf-4", user_id="user1", content="Weekend hiking trip",
+        mem4 = make_memory(
+            memory_id="si-mf-4",
+            user_id="user1",
+            content="Weekend hiking trip",
             embedding=embed.embed_single("Weekend hiking trip"),
             embedding_dim=embed.dimension(),
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             lifecycle_state=LifecycleState.ACTIVE,
-            session_id="session-b", metadata={"source": "test"},
+            session_id="session-b",
+            metadata={"source": "test"},
         )
         real_db_memory._store.store(mem1)
         real_db_memory._store.store(mem2)
@@ -1783,7 +1844,7 @@ class TestCLIRealDB:
 
         # Query session-a + source=test with exact text for deterministic hash match
         # Only memory 1 should match both filters
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1811,52 +1872,95 @@ class TestCLIRealDB:
         Memories are stored via _store.store() to bypass dedup.
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(memory_id="trip-1", user_id="user1", content="I visited Tokyo last spring",
+            make_memory(
+                memory_id="trip-1",
+                user_id="user1",
+                content="I visited Tokyo last spring",
                 embedding=embed.embed_single("I visited Tokyo last spring"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-a", metadata={"source": "test"}),
-            MemoryObject(memory_id="trip-2", user_id="user1", content="Python programming is fun",
+                namespace="work",
+                session_id="session-a",
+                metadata={"source": "test"},
+            ),
+            make_memory(
+                memory_id="trip-2",
+                user_id="user1",
+                content="Python programming is fun",
                 embedding=embed.embed_single("Python programming is fun"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-a", metadata={"source": "test"}),
-            MemoryObject(memory_id="trip-3", user_id="user1", content="Important meeting notes",
+                namespace="personal",
+                session_id="session-a",
+                metadata={"source": "test"},
+            ),
+            make_memory(
+                memory_id="trip-3",
+                user_id="user1",
+                content="Important meeting notes",
                 embedding=embed.embed_single("Important meeting notes"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-b", metadata={"source": "test"}),
-            MemoryObject(memory_id="trip-4", user_id="user1", content="Weekend hiking trip",
+                namespace="work",
+                session_id="session-b",
+                metadata={"source": "test"},
+            ),
+            make_memory(
+                memory_id="trip-4",
+                user_id="user1",
+                content="Weekend hiking trip",
                 embedding=embed.embed_single("Weekend hiking trip"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-a", metadata={"source": "other"}),
-            MemoryObject(memory_id="trip-5", user_id="user1", content="Lunch at noon",
+                namespace="work",
+                session_id="session-a",
+                metadata={"source": "other"},
+            ),
+            make_memory(
+                memory_id="trip-5",
+                user_id="user1",
+                content="Lunch at noon",
                 embedding=embed.embed_single("Lunch at noon"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-a", metadata={"source": "other"}),
-            MemoryObject(memory_id="trip-6", user_id="user1", content="Running in the park",
+                namespace="personal",
+                session_id="session-a",
+                metadata={"source": "other"},
+            ),
+            make_memory(
+                memory_id="trip-6",
+                user_id="user1",
+                content="Running in the park",
                 embedding=embed.embed_single("Running in the park"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-b", metadata={"source": "other"}),
+                namespace="personal",
+                session_id="session-b",
+                metadata={"source": "other"},
+            ),
         ]
         for m in mems:
             real_db_memory._store.store(m)
 
         # Work namespace + session-a + source=test — only memory trip-1 matches all three
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1887,80 +1991,137 @@ class TestCLIRealDB:
         Uses _store.store() to bypass dedup.
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
             # target: work/session-a/source=test/tags=["travel","tokyo"]
-            MemoryObject(memory_id="all-1", user_id="user1", content="I visited Tokyo last spring",
+            make_memory(
+                memory_id="all-1",
+                user_id="user1",
+                content="I visited Tokyo last spring",
                 embedding=embed.embed_single("I visited Tokyo last spring"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-a", metadata={"source": "test"},
-                tags=["travel", "tokyo"]),
+                namespace="work",
+                session_id="session-a",
+                metadata={"source": "test"},
+                tags=["travel", "tokyo"],
+            ),
             # wrong namespace (personal vs work)
-            MemoryObject(memory_id="all-2", user_id="user1", content="Python programming is fun",
+            make_memory(
+                memory_id="all-2",
+                user_id="user1",
+                content="Python programming is fun",
                 embedding=embed.embed_single("Python programming is fun"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-a", metadata={"source": "test"},
-                tags=["coding", "python"]),
+                namespace="personal",
+                session_id="session-a",
+                metadata={"source": "test"},
+                tags=["coding", "python"],
+            ),
             # wrong session (session-b vs session-a)
-            MemoryObject(memory_id="all-3", user_id="user1", content="Important meeting notes",
+            make_memory(
+                memory_id="all-3",
+                user_id="user1",
+                content="Important meeting notes",
                 embedding=embed.embed_single("Important meeting notes"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-b", metadata={"source": "test"},
-                tags=["work", "meeting"]),
+                namespace="work",
+                session_id="session-b",
+                metadata={"source": "test"},
+                tags=["work", "meeting"],
+            ),
             # wrong metadata (source=other vs source=test)
-            MemoryObject(memory_id="all-4", user_id="user1", content="Weekend hiking trip",
+            make_memory(
+                memory_id="all-4",
+                user_id="user1",
+                content="Weekend hiking trip",
                 embedding=embed.embed_single("Weekend hiking trip"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-a", metadata={"source": "other"},
-                tags=["hiking", "weekend"]),
+                namespace="work",
+                session_id="session-a",
+                metadata={"source": "other"},
+                tags=["hiking", "weekend"],
+            ),
             # personal/session-a/other
-            MemoryObject(memory_id="all-5", user_id="user1", content="Lunch at noon",
+            make_memory(
+                memory_id="all-5",
+                user_id="user1",
+                content="Lunch at noon",
                 embedding=embed.embed_single("Lunch at noon"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-a", metadata={"source": "other"},
-                tags=["food"]),
+                namespace="personal",
+                session_id="session-a",
+                metadata={"source": "other"},
+                tags=["food"],
+            ),
             # personal/session-b/test
-            MemoryObject(memory_id="all-6", user_id="user1", content="Running in the park",
+            make_memory(
+                memory_id="all-6",
+                user_id="user1",
+                content="Running in the park",
                 embedding=embed.embed_single("Running in the park"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-b", metadata={"source": "test"},
-                tags=["sports", "fitness"]),
+                namespace="personal",
+                session_id="session-b",
+                metadata={"source": "test"},
+                tags=["sports", "fitness"],
+            ),
             # personal/session-b/other
-            MemoryObject(memory_id="all-7", user_id="user1", content="Reading a book",
+            make_memory(
+                memory_id="all-7",
+                user_id="user1",
+                content="Reading a book",
                 embedding=embed.embed_single("Reading a book"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="personal", session_id="session-b", metadata={"source": "other"},
-                tags=["reading"]),
+                namespace="personal",
+                session_id="session-b",
+                metadata={"source": "other"},
+                tags=["reading"],
+            ),
             # work/session-b/other
-            MemoryObject(memory_id="all-8", user_id="user1", content="Coding at night",
+            make_memory(
+                memory_id="all-8",
+                user_id="user1",
+                content="Coding at night",
                 embedding=embed.embed_single("Coding at night"),
                 embedding_dim=embed.dimension(),
-                created_at=datetime.now(timezone.utc), last_accessed_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+                last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
-                namespace="work", session_id="session-b", metadata={"source": "other"},
-                tags=["coding"]),
+                namespace="work",
+                session_id="session-b",
+                metadata={"source": "other"},
+                tags=["coding"],
+            ),
         ]
         for m in mems:
             real_db_memory._store.store(m)
 
         # Work namespace + session-a + source=test — only memory all-1 matches all three
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -1997,8 +2158,8 @@ class TestCLIRealDB:
         """stats shows correct counts after storing memories."""
         real_db_memory.remember("user1", "I learned to bake sourdough bread", importance=0.6)
         real_db_memory.remember("user1", "The capital of Japan is Tokyo", importance=0.7)
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(sys, "argv", ["kemi", "stats", "user1"]):
                     main()
         captured = capsys.readouterr()
@@ -2014,12 +2175,15 @@ class TestCLIRealDB:
         with shared words).
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(
-                memory_id="stc-1", user_id="user1", content="alpha weather report",
+            make_memory(
+                memory_id="stc-1",
+                user_id="user1",
+                content="alpha weather report",
                 tags=["foo", "bar"],
                 embedding=embed.embed_single("alpha weather report"),
                 embedding_dim=embed.dimension(),
@@ -2027,8 +2191,10 @@ class TestCLIRealDB:
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="stc-2", user_id="user1", content="beta quantum stuff",
+            make_memory(
+                memory_id="stc-2",
+                user_id="user1",
+                content="beta quantum stuff",
                 tags=["baz"],
                 embedding=embed.embed_single("beta quantum stuff"),
                 embedding_dim=embed.dimension(),
@@ -2036,8 +2202,10 @@ class TestCLIRealDB:
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="stc-3", user_id="user1", content="untagged memory",
+            make_memory(
+                memory_id="stc-3",
+                user_id="user1",
+                content="untagged memory",
                 tags=None,
                 embedding=embed.embed_single("untagged memory"),
                 embedding_dim=embed.dimension(),
@@ -2050,8 +2218,8 @@ class TestCLIRealDB:
             real_db_memory._store.store(m)
 
         # Run stats via CLI to verify the tag statistics are displayed
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(sys, "argv", ["kemi", "stats", "user1"]):
                     main()
         captured = capsys.readouterr()
@@ -2067,7 +2235,7 @@ class TestCLIRealDB:
     def test_update_via_cli(self, real_db_memory: Memory, capsys):
         """update command changes memory content."""
         mem_id = real_db_memory.remember("user1", "original content")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "update", mem_id, "--content", "updated content"]
             ):
@@ -2080,7 +2248,7 @@ class TestCLIRealDB:
     def test_update_importance_via_cli(self, real_db_memory: Memory, capsys):
         """update --importance changes importance value."""
         mem_id = real_db_memory.remember("user1", "important memory", importance=0.3)
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "update", mem_id, "--importance", "0.95"]):
                 main()
         captured = capsys.readouterr()
@@ -2091,7 +2259,7 @@ class TestCLIRealDB:
     def test_update_metadata_via_cli(self, real_db_memory: Memory, capsys):
         """update --metadata merges metadata into the memory."""
         mem_id = real_db_memory.remember("user1", "memory with metadata update")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2110,7 +2278,7 @@ class TestCLIRealDB:
     def test_update_content_and_metadata_via_cli(self, real_db_memory: Memory, capsys):
         """update --content combined with --metadata changes both fields."""
         mem_id = real_db_memory.remember("user1", "original content")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2131,7 +2299,7 @@ class TestCLIRealDB:
     def test_update_tags_via_cli(self, real_db_memory: Memory, capsys):
         """update --tags replaces tags on a memory via CLI."""
         mem_id = real_db_memory.remember("user1", "memory with tags")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2147,7 +2315,7 @@ class TestCLIRealDB:
     def test_update_content_importance_metadata_via_cli(self, real_db_memory: Memory, capsys):
         """update --content combined with --importance and --metadata changes all three fields."""
         mem_id = real_db_memory.remember("user1", "original content", importance=0.3)
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2173,11 +2341,11 @@ class TestCLIRealDB:
         mid1 = real_db_memory.remember("user1", "alpha content")
         mid2 = real_db_memory.remember("user1", "beta content")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "update-many", mid1, mid2, "--content", "updated content", "--importance", "0.9"],
+                ["kemi", "update-many", mid1, mid2, "--content", "updated content", "--importance", "0.9"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2196,7 +2364,7 @@ class TestCLIRealDB:
         from datetime import timedelta
 
         old_time = datetime.now(timezone.utc) - timedelta(days=100)
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="old-prune-1",
             user_id="user1",
             content="old memory to prune",
@@ -2208,7 +2376,7 @@ class TestCLIRealDB:
         )
         real_db_memory._store.store(mem)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "prune", "user1", "--max-age-days", "30"]):
                 main()
         captured = capsys.readouterr()
@@ -2221,7 +2389,7 @@ class TestCLIRealDB:
 
         old_time = datetime.now(timezone.utc) - timedelta(days=60)
         for i in range(5):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"real-ep-{i}",
                 user_id="user1",
                 content=f"I visited Paris on day {i}",
@@ -2233,7 +2401,7 @@ class TestCLIRealDB:
             )
             real_db_memory._store.store(mem)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "consolidate", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -2242,7 +2410,7 @@ class TestCLIRealDB:
     def test_graph_via_cli(self, real_db_memory: Memory, capsys):
         """graph through main() extracts entities and relations from real SQLite DB."""
         real_db_memory.remember("user1", "Alice works at Google and Bob lives in London.")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "graph", "user1"]):
                 main()
         captured = capsys.readouterr()
@@ -2252,7 +2420,7 @@ class TestCLIRealDB:
     def test_explain_via_cli(self, real_db_memory: Memory, capsys):
         """explain through main() shows score breakdown from real SQLite DB."""
         real_db_memory.remember("user1", "Python programming is fun and useful")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "explain", "user1", "Python coding"]
             ):
@@ -2266,7 +2434,7 @@ class TestCLIRealDB:
         real_db_memory.remember("alice", "Alice visited the Louvre museum")
         real_db_memory.remember("alice", "Bob hiked in the Rocky Mountains")
         real_db_memory.remember("bob", "Charlie learned to code Python")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "list-users"]):
                 main()
         captured = capsys.readouterr()
@@ -2277,8 +2445,8 @@ class TestCLIRealDB:
         """recall-stream through main() finds memories from real SQLite DB."""
         real_db_memory.remember("user1", "I visited Tokyo last spring")
         # Query with exact stored text for deterministic hash match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch.object(sys, "argv", ["kemi", "recall-stream", "user1", "I visited Tokyo last spring"]):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch.object(sys, "argv", ["kemi", "recall-stream", "user1", "I visited Tokyo last spring"]):  # noqa: E501
                 main()
         captured = capsys.readouterr()
         assert "#  1 | Score:" in captured.out
@@ -2289,7 +2457,7 @@ class TestCLIRealDB:
         """recall-stream through main() streams a single result from real DB."""
         real_db_memory.remember("user1", "only memory here")
         # Query with exact text for deterministic hash match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "recall-stream", "user1", "only memory here"]):
                 main()
         captured = capsys.readouterr()
@@ -2302,9 +2470,9 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "work project details", namespace="work")
         real_db_memory.remember("user1", "personal notes", namespace="personal")
         # Query with exact text for deterministic hash match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
-                sys, "argv", ["kemi", "recall-stream", "user1", "work project details", "--namespace", "work"]
+                sys, "argv", ["kemi", "recall-stream", "user1", "work project details", "--namespace", "work"]  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2317,7 +2485,7 @@ class TestCLIRealDB:
         # Store memories for a different user so user1 has no memories
         real_db_memory.remember("user1", "some memory content")
         # Query for a different user that has no memories
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "recall-stream", "nonexistent-user", "test"]):
                 main()
         captured = capsys.readouterr()
@@ -2329,7 +2497,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "alpha memory content")
         real_db_memory.remember("user1", "beta memory content")
         real_db_memory.remember("user1", "gamma memory content")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys, "argv", ["kemi", "recall-stream", "user1", "content", "--top-k", "2"]
             ):
@@ -2346,11 +2514,11 @@ class TestCLIRealDB:
         """recall-stream --hybrid-search true works with a real SQLite DB."""
         real_db_memory.remember("user1", "I visited Tokyo last spring with friends")
         # Exact-text query guarantees deterministic hash match + BM25 keyword match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring with friends", "--hybrid-search", "true"],
+                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring with friends", "--hybrid-search", "true"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2362,11 +2530,11 @@ class TestCLIRealDB:
         """recall-stream --hybrid-search false works with a real SQLite DB."""
         real_db_memory.remember("user1", "I visited Tokyo last spring with friends")
         # Exact-text query guarantees deterministic hash match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring with friends", "--hybrid-search", "false"],
+                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring with friends", "--hybrid-search", "false"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2380,7 +2548,7 @@ class TestCLIRealDB:
         # Store a memory with a distinctive keyword
         real_db_memory.remember("user1", "the capital of France is Paris")
         # Query with a substring/keyword from the content — FTS5 BM25 will match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2398,7 +2566,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "I visited Tokyo last spring", metadata={"source": "test"})
         real_db_memory.remember("user1", "Python programming is fun", metadata={"source": "other"})
         # Exact-text query for deterministic hash match on the first memory
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2417,7 +2585,7 @@ class TestCLIRealDB:
     def test_recall_stream_metadata_filter_no_match(self, real_db_memory: Memory, capsys):
         """recall-stream --metadata-filter with no match prints empty message."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", metadata={"source": "test"})
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2434,11 +2602,11 @@ class TestCLIRealDB:
         """recall-stream --hooks-raise-on-error parses and works with real DB."""
         real_db_memory.remember("user1", "I visited Tokyo last spring")
         # Flags are global (defined on parser, not subcommand) so they come first
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "--hooks-raise-on-error", "recall-stream", "user1", "I visited Tokyo last spring"],
+                ["kemi", "--hooks-raise-on-error", "recall-stream", "user1", "I visited Tokyo last spring"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2448,11 +2616,11 @@ class TestCLIRealDB:
     def test_recall_stream_with_no_hooks_raise_on_error(self, real_db_memory: Memory, capsys):
         """recall-stream --no-hooks-raise-on-error parses and works with real DB."""
         real_db_memory.remember("user1", "I visited Tokyo last spring")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "--no-hooks-raise-on-error", "recall-stream", "user1", "I visited Tokyo last spring"],
+                ["kemi", "--no-hooks-raise-on-error", "recall-stream", "user1", "I visited Tokyo last spring"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2468,7 +2636,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "personal note one", namespace="personal")
         real_db_memory.remember("user1", "personal note two", namespace="personal")
         # Query the work namespace with top_k that limits results
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2492,11 +2660,11 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "I visited Tokyo last spring", session_id="session-a")
         real_db_memory.remember("user1", "Python programming is fun", session_id="session-b")
         # Query with exact text for deterministic hash match
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring", "--session-id", "session-a"],
+                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring", "--session-id", "session-a"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2508,11 +2676,11 @@ class TestCLIRealDB:
     def test_recall_stream_session_id_no_match(self, real_db_memory: Memory, capsys):
         """recall-stream --session-id with no matching memories prints message."""
         real_db_memory.remember("user1", "I visited Tokyo last spring", session_id="session-a")
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring", "--session-id", "nonexistent-session"],
+                ["kemi", "recall-stream", "user1", "I visited Tokyo last spring", "--session-id", "nonexistent-session"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -2526,20 +2694,25 @@ class TestCLIRealDB:
         Uses _store.store() to bypass dedup.
         """
         from datetime import datetime, timezone
-        from kemi.models import LifecycleState
+
+        from kemi.memory.model import LifecycleState
 
         embed = real_db_memory._embed
         mems = [
-            MemoryObject(
-                memory_id="rm-1", user_id="user1", content="alpha brand content",
+            make_memory(
+                memory_id="rm-1",
+                user_id="user1",
+                content="alpha brand content",
                 embedding=embed.embed_single("alpha brand content"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
                 last_accessed_at=datetime.now(timezone.utc),
                 lifecycle_state=LifecycleState.ACTIVE,
             ),
-            MemoryObject(
-                memory_id="rm-2", user_id="user1", content="beta random stuff",
+            make_memory(
+                memory_id="rm-2",
+                user_id="user1",
+                content="beta random stuff",
                 embedding=embed.embed_single("beta random stuff"),
                 embedding_dim=embed.dimension(),
                 created_at=datetime.now(timezone.utc),
@@ -2550,7 +2723,7 @@ class TestCLIRealDB:
         for m in mems:
             real_db_memory._store.store(m)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2570,7 +2743,7 @@ class TestCLIRealDB:
         mid2 = real_db_memory.remember("user1", "Python programming is fun")
         out_file = str(tmp_path / "exported_real.json")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(sys, "argv", ["kemi", "export", out_file]):
                 main()
 
@@ -2625,8 +2798,8 @@ class TestCLIRealDB:
         with open(in_file, "w") as f:
             json.dump(data, f)
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(sys, "argv", ["kemi", "import", in_file]):
                     main()
 
@@ -2654,7 +2827,7 @@ class TestCLIRealDB:
         real_db_memory.remember("user1", "Weekend hiking trip", namespace="personal")
         real_db_memory.remember("user1", "Grocery shopping list", namespace="personal")
         # Combine all three flags: limit results, scope to work namespace, use hybrid search
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
             with patch.object(
                 sys,
                 "argv",
@@ -2679,7 +2852,7 @@ class TestCLIUpdate:
 
     def _store_memory(self, mock_memory: Memory) -> str:
         """Store a sample memory and return its ID."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="upd-1",
             user_id="user1",
             content="original content",
@@ -2692,7 +2865,7 @@ class TestCLIUpdate:
     def test_update_no_fields_errors(self, _patch_get_memory, mock_memory: Memory):
         """update with no optional fields should error and exit."""
         self._store_memory(mock_memory)
-        with patch("kemi.cli.sys.exit") as mock_exit:
+        with patch("kemi.interfaces.cli.main.sys.exit") as mock_exit:
             update_memory(
                 argparse.Namespace(
                     memory_id="upd-1",
@@ -2796,8 +2969,8 @@ class TestCLIUpdate:
     def test_update_value_error_from_memory(self, _patch_get_memory, mock_memory: Memory):
         """update propagates ValueError from Memory.update as a clean exit."""
         self._store_memory(mock_memory)
-        with patch("kemi.cli.Memory.update", side_effect=ValueError("bad id")):
-            with patch("kemi.cli.sys.exit") as mock_exit:
+        with patch("kemi.interfaces.cli.main.Memory.update", side_effect=ValueError("bad id")):
+            with patch("kemi.interfaces.cli.main.sys.exit") as mock_exit:
                 update_memory(
                     argparse.Namespace(
                         memory_id="upd-1",

@@ -81,7 +81,7 @@ we add more event types. Treat it as opaque on the consumer side.
 - `kemi.core._QueryCache` — re-export shim. The canonical location is
   `kemi.operations._query_cache._QueryCache`. The shim may be removed
   in a future major version.
-- `kemi.versions` dataclasses (`VersionSnapshot`, `DiffResult`,
+- `kemi.memory.versions` dataclasses (`VersionSnapshot`, `DiffResult`,
   `RollbackResult`, `MemoryVersionStore`) — the shape of the
   *return values* is stable, but the class internals are not part of
   the API.

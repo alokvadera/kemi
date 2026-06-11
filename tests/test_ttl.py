@@ -5,7 +5,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from kemi import Memory
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
+from tests._helpers.factories import make_memory
+
+pytestmark = pytest.mark.slow
 
 
 def _make_mem_with_ttl(**overrides: object) -> MemoryObject:
@@ -32,7 +35,7 @@ def _make_mem_with_ttl(**overrides: object) -> MemoryObject:
         "expires_at": None,
     }
     defaults.update(overrides)
-    return MemoryObject(**defaults)
+    return make_memory(**defaults)
 
 
 class TestMemoryObjectTTL:

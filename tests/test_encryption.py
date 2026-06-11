@@ -1,22 +1,27 @@
+from tests._helpers.factories import make_memory
+
 """Tests for at-rest encryption in storage adapters."""
 
 import json
 import os
 import tempfile
-from unittest.mock import patch
 
 import pytest
 
-from kemi.encryption import (
+from kemi.exceptions import EncryptionError
+from kemi.infra.encryption import (
     EncryptionConfig,
-    FieldEncryptor,
     FernetEncryptor,
+    FieldEncryptor,
     generate_key,
     is_cryptography_available,
     is_sqlcipher_available,
     load_key_from_file,
 )
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+
+pytestmark = pytest.mark.slow
+
+from kemi.memory.model import LifecycleState, MemorySource, MemoryType
 
 
 class TestFernetEncryptor:
@@ -68,6 +73,43 @@ class TestFernetEncryptor:
         # But both decrypt to same original
         assert encryptor.decrypt_str(e1) == text
         assert encryptor.decrypt_str(e2) == text
+
+    def test_weak_key_logs_warning(self, caplog):
+        """Passing a non-Fernet key triggers a fallback warning."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        with caplog.at_level("WARNING", logger="kemi.infra.encryption"):
+            # A short plain-text key is not a valid Fernet key, so the
+            # constructor falls back to the legacy SHA-256 derivation and
+            # logs a warning.
+            encryptor = FernetEncryptor("weak-plaintext-key")
+
+        assert any("not a valid Fernet key" in m for m in caplog.messages)
+        # Despite the warning, the encryptor still works.
+        encrypted = encryptor.encrypt("hello")
+        assert encryptor.decrypt_str(encrypted) == "hello"
+
+    def test_salted_key_no_warning(self, caplog):
+        """A proper PBKDF2-salted key does not trigger the weak-key warning."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        with caplog.at_level("WARNING", logger="kemi.infra.encryption"):
+            FernetEncryptor("my-password", salt=b"16-byte-salt-here")
+
+        assert not any("not a valid Fernet key" in m for m in caplog.messages)
+
+    def test_valid_fernet_key_no_warning(self, caplog):
+        """A correctly generated Fernet key does not trigger the warning."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        key = generate_key()
+        with caplog.at_level("WARNING", logger="kemi.infra.encryption"):
+            FernetEncryptor(key)
+
+        assert not any("not a valid Fernet key" in m for m in caplog.messages)
 
 
 class TestFieldEncryptor:
@@ -179,6 +221,74 @@ class TestFieldEncryptor:
         assert result["content"] is None
         assert result["metadata"] is None
 
+    def test_pbkdf2_salt_in_envelope(self):
+        """Newly encrypted fields store salt + kdf=pbkdf2 in the envelope."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        # Use a plain passphrase (not a Fernet key) to force the PBKDF2 path.
+        config = EncryptionConfig(enabled=True, key="my-secure-passphrase")
+        encryptor = FieldEncryptor(config)
+
+        row = {"content": "sensitive data", "metadata": {"level": 9}}
+        encrypted = encryptor.encrypt_memory_row(row)
+
+        # The envelope must contain PBKDF2 metadata.
+        assert "salt" in encrypted["content"]
+        assert encrypted["content"]["kdf"] == "pbkdf2"
+        assert "data" in encrypted["content"]
+
+        assert "salt" in encrypted["metadata"]
+        assert encrypted["metadata"]["kdf"] == "pbkdf2"
+
+    def test_pbkdf2_encrypt_decrypt_roundtrip(self):
+        """Encrypt with PBKDF2 + salt, decrypt with stored salt — full roundtrip."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        config = EncryptionConfig(enabled=True, key="another-passphrase")
+        encryptor = FieldEncryptor(config)
+
+        original = {
+            "memory_id": "mem-789",
+            "user_id": "charlie",
+            "content": "Top secret",
+            "metadata": {"nested": {"deep": [1, 2, 3]}},
+        }
+
+        encrypted = encryptor.encrypt_memory_row(original)
+        decrypted = encryptor.decrypt_memory_row(encrypted)
+
+        assert decrypted["content"] == "Top secret"
+        assert decrypted["metadata"] == {"nested": {"deep": [1, 2, 3]}}
+        assert decrypted["user_id"] == "charlie"
+
+    def test_legacy_encrypted_data_backward_compat(self):
+        """Legacy data encrypted before PBKDF2 (no salt, no kdf) still decrypts."""
+        if not is_cryptography_available():
+            pytest.skip("cryptography not installed")
+
+        passphrase = "legacy-compat-pass"
+        config = EncryptionConfig(enabled=True, key=passphrase)
+        encryptor = FieldEncryptor(config)
+
+        # Simulate legacy encryption: use the raw _fernet (SHA-256 fallback)
+        # without any salt or kdf marker.
+        legacy_ciphertext = encryptor._fernet.encrypt(
+            json.dumps("old secret").encode("utf-8")
+        )
+        legacy_row = {
+            "memory_id": "mem-old",
+            "content": {
+                "encrypted": True,
+                "key_id": config.key_id,
+                "data": legacy_ciphertext,
+            },
+        }
+
+        decrypted = encryptor.decrypt_memory_row(legacy_row)
+        assert decrypted["content"] == "old secret"
+
 
 class TestEncryptionConfig:
     """Tests for EncryptionConfig loading and key management."""
@@ -207,9 +317,9 @@ class TestEncryptionConfig:
             EncryptionConfig.from_key_file("/nonexistent/path/to/key")
 
     def test_key_property_raises_when_no_key(self):
-        """key property raises ValueError when no key configured."""
+        """key property raises EncryptionError when no key configured."""
         config = EncryptionConfig(enabled=True, key="", key_file=None)
-        with pytest.raises(ValueError, match="No encryption key"):
+        with pytest.raises(EncryptionError, match="No encryption key"):
             _ = config.key
 
     def test_key_property_loads_from_key_file(self):
@@ -273,21 +383,18 @@ class TestEncryptionIntegrationSQLite:
             config = EncryptionConfig(enabled=True, mode="fernet", key=key)
             adapter = SQLiteStorageAdapter(db_path=db_path, encryption=config)
 
-            memory = MemoryObject(
+            memory = make_memory(
                 memory_id="enc-test-1",
                 user_id="user_enc",
                 content="This content is encrypted at rest",
                 embedding=[0.1, 0.2, 0.3],
-                score=0.0,
                 source=MemorySource.USER_STATED,
                 importance=0.7,
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"secret_tag": "classified", "level": 5},
                 embedding_dim=3,
                 tags=["encrypted", "test"],
-                confidence=1.0,
                 memory_type=MemoryType.EPISODIC,
-                namespace="default",
                 version=1,
             )
 
@@ -308,21 +415,17 @@ class TestEncryptionIntegrationSQLite:
             db_path = os.path.join(tmpdir, "plain.db")
             adapter = SQLiteStorageAdapter(db_path=db_path)  # no encryption
 
-            memory = MemoryObject(
+            memory = make_memory(
                 memory_id="plain-test-1",
                 user_id="alice",
                 content="Plaintext content",
                 embedding=None,
-                score=0.0,
                 source=MemorySource.USER_STATED,
-                importance=0.5,
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"plain": True},
                 embedding_dim=None,
                 tags=[],
-                confidence=1.0,
                 memory_type=MemoryType.EPISODIC,
-                namespace="default",
                 version=1,
             )
 
@@ -347,21 +450,16 @@ class TestEncryptionIntegrationSQLite:
             adapter = SQLiteStorageAdapter(db_path=db_path, encryption=config)
 
             memories = [
-                MemoryObject(
+                make_memory(
                     memory_id=f"batch-{i}",
                     user_id="batch_user",
                     content=f"Batch memory number {i}",
                     embedding=[0.1] * 3,
-                    score=0.0,
                     source=MemorySource.USER_STATED,
-                    importance=0.5,
                     lifecycle_state=LifecycleState.ACTIVE,
                     metadata={"index": i},
-                    embedding_dim=3,
                     tags=[],
-                    confidence=1.0,
                     memory_type=MemoryType.EPISODIC,
-                    namespace="default",
                     version=1,
                 )
                 for i in range(3)
@@ -390,21 +488,18 @@ class TestEncryptionIntegrationSQLite:
             adapter = SQLiteStorageAdapter(db_path=db_path, encryption=config)
 
             # Store a memory
-            memory = MemoryObject(
+            memory = make_memory(
                 memory_id="search-enc-1",
                 user_id="search_user",
                 content="Python programming tutorial",
                 embedding=[0.5, 0.3, 0.8],
-                score=0.0,
                 source=MemorySource.USER_STATED,
                 importance=0.6,
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"language": "python"},
                 embedding_dim=3,
                 tags=["coding", "tutorial"],
-                confidence=1.0,
                 memory_type=MemoryType.EPISODIC,
-                namespace="default",
                 version=1,
             )
             adapter.store(memory)
@@ -438,21 +533,18 @@ class TestEncryptionIntegrationJSON:
             config = EncryptionConfig(enabled=True, key=key)
             adapter = JSONStorageAdapter(path=json_path, encryption=config)
 
-            memory = MemoryObject(
+            memory = make_memory(
                 memory_id="json-enc-1",
                 user_id="json_enc_user",
                 content="JSON encrypted content",
                 embedding=None,
-                score=0.0,
                 source=MemorySource.USER_STATED,
                 importance=0.8,
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={"json_encrypted": True},
                 embedding_dim=None,
                 tags=["json", "test"],
-                confidence=1.0,
                 memory_type=MemoryType.SEMANTIC,
-                namespace="default",
                 version=1,
             )
 
@@ -472,21 +564,17 @@ class TestEncryptionIntegrationJSON:
             json_path = os.path.join(tmpdir, "plain.json")
             adapter = JSONStorageAdapter(path=json_path)  # no encryption
 
-            memory = MemoryObject(
+            memory = make_memory(
                 memory_id="json-plain-1",
                 user_id="alice",
                 content="Plain JSON content",
                 embedding=None,
-                score=0.0,
                 source=MemorySource.USER_STATED,
-                importance=0.5,
                 lifecycle_state=LifecycleState.ACTIVE,
                 metadata={},
                 embedding_dim=None,
                 tags=[],
-                confidence=1.0,
                 memory_type=MemoryType.EPISODIC,
-                namespace="default",
                 version=1,
             )
 
@@ -501,22 +589,22 @@ class TestSQLCipherManager:
     """Tests for SQLCipher full-database encryption."""
 
     def test_sqlcipher_manager_requires_key(self):
-        """SQLCipherManager raises ValueError without key or key_file."""
-        from kemi.encryption import SQLCipherManager
+        """SQLCipherManager raises EncryptionError without key or key_file."""
+        from kemi.infra.encryption import SQLCipherManager
 
-        with pytest.raises(ValueError, match="requires a key"):
+        with pytest.raises(EncryptionError, match="requires a key"):
             SQLCipherManager()
 
     def test_sqlcipher_manager_with_key(self):
         """SQLCipherManager accepts key parameter."""
-        from kemi.encryption import SQLCipherManager
+        from kemi.infra.encryption import SQLCipherManager
 
         manager = SQLCipherManager(key="test-key-12345")
         assert manager.key == "test-key-12345"
 
     def test_sqlcipher_manager_key_file(self):
         """SQLCipherManager loads key from file."""
-        from kemi.encryption import SQLCipherManager
+        from kemi.infra.encryption import SQLCipherManager
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False) as f:
             f.write("sqlcipher-test-key")

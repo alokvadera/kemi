@@ -1,13 +1,13 @@
 """Tests for src/kemi/versions.py — memory versioning and rollback."""
 
-import json
 
-import pytest
+import sqlite3
 from datetime import datetime, timezone
 
-from kemi import versions
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
-from kemi.versions import (
+import pytest
+
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory.versions import (
     DiffResult,
     MemoryVersionStore,
     RollbackResult,
@@ -15,7 +15,9 @@ from kemi.versions import (
     diff_memories,
     enable_versioning,
 )
+from tests._helpers.factories import make_memory
 
+pytestmark = pytest.mark.slow
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -89,8 +91,7 @@ class TestDiffResult:
 class TestMemoryVersionStoreInit:
     def test_creates_tables_on_init(self, tmp_path) -> None:
         db_path = str(tmp_path / "versions_test.db")
-        store = MemoryVersionStore(db_path=db_path)
-        import sqlite3
+        MemoryVersionStore(db_path=db_path)
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -102,8 +103,8 @@ class TestMemoryVersionStoreInit:
 
     def test_re_init_same_path_ok(self, tmp_path) -> None:
         db_path = str(tmp_path / "versions_test.db")
-        store1 = MemoryVersionStore(db_path=db_path)
-        store2 = MemoryVersionStore(db_path=db_path)
+        MemoryVersionStore(db_path=db_path)
+        MemoryVersionStore(db_path=db_path)
         # No-op, tables already exist
 
 
@@ -427,7 +428,7 @@ class TestRollback:
         snaps = store.list_versions("mem-rb-new")
         versions = {s.version for s in snaps}
         # Should have v1, current, and the new rollback version
-        assert len(versions) >= 2  # rollback + pre-rollback record (not re-record of target version)
+        assert len(versions) >= 2  # rollback + pre-rollback record (not re-record of target version)  # noqa: E501
 
 
 # ---------------------------------------------------------------------------
@@ -496,12 +497,11 @@ def _make_memory(
     content: str,
     importance: float = 0.5,
 ) -> MemoryObject:
-    return MemoryObject(
+    return make_memory(
         memory_id=memory_id,
         user_id=user_id,
         content=content,
         embedding=[0.1, 0.2, 0.3],
-        score=0.0,
         created_at=datetime.now(timezone.utc),
         last_accessed_at=datetime.now(timezone.utc),
         source=MemorySource.USER_STATED,
@@ -510,9 +510,7 @@ def _make_memory(
         metadata={},
         embedding_dim=3,
         tags=[],
-        confidence=1.0,
         memory_type=MemoryType.EPISODIC,
         session_id=None,
-        namespace="default",
         version=1,
     )

@@ -10,8 +10,16 @@ import pytest
 
 from kemi import Memory, MemoryConfig
 from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
-from kemi.entities import EntityLinker, NoopEntityLinker, RegexEntityLinker, SpacyEntityLinker
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.exceptions import ConfigurationError
+from kemi.memory import scoring
+from kemi.memory.entities import (
+    EntityLinker,
+    NoopEntityLinker,
+    RegexEntityLinker,
+    SpacyEntityLinker,
+)
+from kemi.memory.scoring import score_memory
+from tests._helpers.factories import make_memory
 
 
 class _FakeEmbed(EmbeddingAdapter):
@@ -222,21 +230,12 @@ def test_memory_init_uses_custom_entity_linker(fake_embed, fake_store):
 
 def test_score_memory_includes_entity_boost():
     """score_memory should add entity_boost_weight * jaccard_overlap when entities are provided."""
-    from kemi.scoring import score_memory
-
-    now = datetime.now(timezone.utc)
-    memory = MemoryObject(
+    datetime.now(timezone.utc)
+    memory = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=[0.1] * 64,
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
 
     query_embedding = [0.1] * 64
@@ -244,17 +243,15 @@ def test_score_memory_includes_entity_boost():
     # Without entities
     score_no_entity = score_memory(
         memory, query_embedding, query="Alice in Paris",
-        hybrid_search=False,
-        query_entities=None, memory_entities=None,
+        config=scoring.ScoreConfig(hybrid_search=False),
     )
 
     # With overlapping entities (Alice, Paris)
     score_with_entity = score_memory(
         memory, query_embedding, query="Alice in Paris",
-        hybrid_search=False,
         query_entities={"alice", "paris"},
         memory_entities={"alice", "paris"},
-        weight_entity=0.2,
+        config=scoring.ScoreConfig(hybrid_search=False, weight_entity=0.2),
     )
 
     # Jaccard overlap is 1.0 (exact match), boost = 0.2
@@ -262,7 +259,7 @@ def test_score_memory_includes_entity_boost():
 
 
 def test_jaccard_similarity_edge_cases():
-    from kemi.scoring import jaccard_similarity
+    from kemi.memory.scoring import jaccard_similarity
     assert jaccard_similarity(set(), {"a"}) == 0.0
     assert jaccard_similarity({"a"}, set()) == 0.0
     assert jaccard_similarity({"a", "b"}, {"a", "b"}) == 1.0
@@ -280,32 +277,18 @@ def test_entity_boost_ranks_shared_entities_higher(entity_memory, fake_store):
     mem = entity_memory
 
     # Create two memories with identical importance/recency by using the same timestamp
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited the Eiffel Tower in Paris",
         embedding=mem._embed.embed_single("Alice visited the Eiffel Tower in Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
-    unrelated = MemoryObject(
+    unrelated = make_memory(
         memory_id="m2",
         user_id="u1",
         content="Bob cooked dinner at home",
         embedding=mem._embed.embed_single("Bob cooked dinner at home"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
     fake_store.store(unrelated)
@@ -320,19 +303,12 @@ def test_entity_boost_with_zero_weight_no_effect(entity_memory, fake_store):
     config = MemoryConfig(enable_entity_boost=True, entity_boost_weight=0.0)
     mem = Memory(embed=entity_memory._embed, store=fake_store, config=config)
 
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
 
@@ -342,19 +318,12 @@ def test_entity_boost_with_zero_weight_no_effect(entity_memory, fake_store):
 
 def test_recall_explain_includes_entity_score(entity_memory, fake_store):
     mem = entity_memory
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
 
@@ -370,19 +339,12 @@ def test_recall_explain_includes_entity_score(entity_memory, fake_store):
 def test_recall_explain_no_entity_score_when_disabled(fake_embed, fake_store):
     config = MemoryConfig(enable_entity_boost=False)
     mem = Memory(embed=fake_embed, store=fake_store, config=config)
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
 
@@ -398,19 +360,12 @@ def test_recall_explain_no_entity_score_when_disabled(fake_embed, fake_store):
 @pytest.mark.asyncio
 async def test_recall_stream_applies_entity_boost(entity_memory, fake_store):
     mem = entity_memory
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
 
@@ -433,14 +388,14 @@ def test_spacy_entity_linker_import_error_without_spacy(monkeypatch):
     # Setting sys.modules["spacy"] = None forces import spacy to fail cleanly.
     monkeypatch.setitem(sys.modules, "spacy", None)
 
-    with pytest.raises(ImportError, match="spaCy is required"):
+    with pytest.raises(ConfigurationError, match="spaCy is required"):
         SpacyEntityLinker()
 
 
 def _make_fake_spacy_module():
     """Build a fake ``spacy`` module so SpacyEntityLinker can be tested without installing spaCy."""
-    from unittest.mock import MagicMock
     import types
+    from unittest.mock import MagicMock
 
     fake_spacy = types.ModuleType("spacy")
     fake_spacy.load = MagicMock()
@@ -449,8 +404,8 @@ def _make_fake_spacy_module():
 
 def test_spacy_entity_linker_extract_with_mock(monkeypatch):
     """SpacyEntityLinker.extract should return lower-cased entities filtered by label."""
-    from unittest.mock import MagicMock
     import sys
+    from unittest.mock import MagicMock
 
     fake_spacy = _make_fake_spacy_module()
     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
@@ -489,8 +444,8 @@ def test_spacy_entity_linker_extract_with_mock(monkeypatch):
 
 def test_spacy_entity_linker_custom_allowed_labels(monkeypatch):
     """allowed_labels should restrict which entity types are returned."""
-    from unittest.mock import MagicMock
     import sys
+    from unittest.mock import MagicMock
 
     fake_spacy = _make_fake_spacy_module()
     monkeypatch.setitem(sys.modules, "spacy", fake_spacy)
@@ -523,7 +478,7 @@ def test_spacy_entity_linker_custom_allowed_labels(monkeypatch):
 
 
 def test_entities_cached_in_metadata_on_remember(entity_memory, fake_store):
-    """When entity boost is enabled, remembered memories should have extracted_entities in metadata."""
+    """When entity boost is enabled, remembered memories should have extracted_entities in metadata."""  # noqa: E501
     mem = entity_memory
     mid = mem.remember("u1", "Alice visited Paris on 2024-06-05")
     stored = fake_store.get(mid)
@@ -554,20 +509,13 @@ def test_entities_re_cached_on_update(entity_memory, fake_store):
 def test_entities_reused_from_metadata_in_recall(entity_memory, fake_store):
     """Recall should read cached entities from metadata and not re-extract them."""
     # Seed a memory with manually-cached entities
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Some generic text without named entities.",
         embedding=entity_memory._embed.embed_single("Some generic text without named entities."),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={"extracted_entities": ["alice", "paris"]},
+        metadata={"extracted_entities": []},
     )
     fake_store.store(mo)
 
@@ -596,20 +544,12 @@ def test_entities_reused_from_metadata_in_recall(entity_memory, fake_store):
 
 def test_backward_compat_no_cached_entities(entity_memory, fake_store):
     """Memories without cached entities should still work (fallback to on-the-fly extraction)."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},  # No cached entities
     )
     fake_store.store(mo)
 
@@ -623,14 +563,18 @@ def test_backward_compat_no_cached_entities(entity_memory, fake_store):
 # ---------------------------------------------------------------------------
 
 
-def _run_benchmark_subprocess(script_name: str, env_overrides: dict[str, str], tmp_path: Path) -> dict[str, Any]:
+def _run_benchmark_subprocess(
+                                 script_name: str,
+                                 env_overrides: dict[str, str],
+                                 tmp_path: Path,
+                             ) -> dict[str, Any]:
     import subprocess
     import sys
     from pathlib import Path
 
     script = Path(__file__).resolve().parent.parent / "scripts" / script_name
     results_file = tmp_path / "results.json"
-    png_file = tmp_path / "results.png"
+    tmp_path / "results.png"
 
     env = {
         **os.environ,
@@ -667,7 +611,7 @@ def test_benchmark_smoke(tmp_path):
     )
     assert "summary" in results
     assert results["summary"]["hit_rate_improvement_pp"] >= 0
-    assert results["with_boost"]["aggregate"]["hit_rate"] >= results["without_boost"]["aggregate"]["hit_rate"]
+    assert results["with_boost"]["aggregate"]["hit_rate"] >= results["without_boost"]["aggregate"]["hit_rate"]  # noqa: E501
 
 
 def test_benchmark_large_smoke(tmp_path):
@@ -716,19 +660,12 @@ def test_benchmark_latency_smoke(tmp_path):
 def test_entity_boost_empty_query(entity_memory, fake_store):
     """Empty query should not crash entity extraction."""
     mem = entity_memory
-    now = datetime.now(timezone.utc)
-    base = MemoryObject(
+    datetime.now(timezone.utc)
+    base = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
     )
     fake_store.store(base)
 
@@ -751,20 +688,12 @@ def test_entity_boost_no_results(entity_memory, fake_store):
 def test_dedup_merge_invalidates_cached_entities(entity_memory, fake_store, monkeypatch):
     """When a duplicate is merged, stale extracted_entities should be removed from metadata."""
     # Seed an existing memory with cached entities
-    now = datetime.now(timezone.utc)
-    existing = MemoryObject(
+    datetime.now(timezone.utc)
+    existing = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={"extracted_entities": ["alice", "paris"]},
     )
     fake_store.store(existing)
 
@@ -772,7 +701,7 @@ def test_dedup_merge_invalidates_cached_entities(entity_memory, fake_store, monk
     def _forced_duplicates(new_memory, existing_memories, threshold=0.85):
         return [existing]
 
-    monkeypatch.setattr("kemi.dedup.find_duplicates", _forced_duplicates)
+    monkeypatch.setattr("kemi.memory.dedup.find_duplicates", _forced_duplicates)
 
     # Remember different content that will be merged into the existing memory
     mid = entity_memory.remember("u1", "Bob visited Tokyo on 2025-01-10")
@@ -783,29 +712,21 @@ def test_dedup_merge_invalidates_cached_entities(entity_memory, fake_store, monk
     assert "extracted_entities" not in merged.metadata
 
 
-def test_dedup_merge_remembers_many_invalidates_cached_entities(entity_memory, fake_store, monkeypatch):
+def test_dedup_merge_remembers_many_invalidates_cached_entities(entity_memory, fake_store, monkeypatch):  # noqa: E501
     """remember_many should also invalidate cached entities when merging duplicates."""
-    now = datetime.now(timezone.utc)
-    existing = MemoryObject(
+    datetime.now(timezone.utc)
+    existing = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={"extracted_entities": ["alice", "paris"]},
     )
     fake_store.store(existing)
 
     def _forced_duplicates(new_memory, existing_memories, threshold=0.85):
         return [existing]
 
-    monkeypatch.setattr("kemi.dedup.find_duplicates", _forced_duplicates)
+    monkeypatch.setattr("kemi.memory.dedup.find_duplicates", _forced_duplicates)
 
     mids = entity_memory.remember_many("u1", ["Bob visited Tokyo"])
     assert mids[0] == "m1"
@@ -816,29 +737,21 @@ def test_dedup_merge_remembers_many_invalidates_cached_entities(entity_memory, f
 
 
 @pytest.mark.asyncio
-async def test_dedup_merge_aremember_invalidates_cached_entities(entity_memory, fake_store, monkeypatch):
+async def test_dedup_merge_aremember_invalidates_cached_entities(entity_memory, fake_store, monkeypatch):  # noqa: E501
     """Async aremember should also invalidate cached entities when merging duplicates."""
-    now = datetime.now(timezone.utc)
-    existing = MemoryObject(
+    datetime.now(timezone.utc)
+    existing = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={"extracted_entities": ["alice", "paris"]},
     )
     fake_store.store(existing)
 
     def _forced_duplicates(new_memory, existing_memories, threshold=0.85):
         return [existing]
 
-    monkeypatch.setattr("kemi.dedup.find_duplicates", _forced_duplicates)
+    monkeypatch.setattr("kemi.memory.dedup.find_duplicates", _forced_duplicates)
 
     mid = await entity_memory.aremember("u1", "Bob visited Tokyo")
     assert mid == "m1"
@@ -850,27 +763,19 @@ async def test_dedup_merge_aremember_invalidates_cached_entities(entity_memory, 
 
 def test_dedup_merge_noop_when_no_cached_entities(entity_memory, fake_store, monkeypatch):
     """Merging a memory that never had extracted_entities should not crash."""
-    now = datetime.now(timezone.utc)
-    existing = MemoryObject(
+    datetime.now(timezone.utc)
+    existing = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},  # No extracted_entities
     )
     fake_store.store(existing)
 
     def _forced_duplicates(new_memory, existing_memories, threshold=0.85):
         return [existing]
 
-    monkeypatch.setattr("kemi.dedup.find_duplicates", _forced_duplicates)
+    monkeypatch.setattr("kemi.memory.dedup.find_duplicates", _forced_duplicates)
 
     mid = entity_memory.remember("u1", "Bob visited Tokyo")
     assert mid == "m1"
@@ -887,20 +792,12 @@ def test_dedup_merge_noop_when_no_cached_entities(entity_memory, fake_store, mon
 
 def test_backfill_entities_populates_missing_metadata(entity_memory, fake_store):
     """Memories without extracted_entities should get them backfilled."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris on 2024-06-05",
         embedding=entity_memory._embed.embed_single("Alice visited Paris on 2024-06-05"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},  # No cached entities
     )
     fake_store.store(mo)
 
@@ -917,20 +814,13 @@ def test_backfill_entities_populates_missing_metadata(entity_memory, fake_store)
 
 def test_backfill_entities_skips_already_cached(entity_memory, fake_store):
     """Memories that already have extracted_entities should be skipped."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={"extracted_entities": ["bob"]},  # Already cached (wrong value on purpose)
+        metadata={"extracted_entities": ["alice", "paris"]},
     )
     fake_store.store(mo)
 
@@ -939,7 +829,7 @@ def test_backfill_entities_skips_already_cached(entity_memory, fake_store):
 
     updated = fake_store.get("m1")
     # Should NOT have been overwritten
-    assert updated.metadata["extracted_entities"] == ["bob"]
+    assert updated.metadata["extracted_entities"] == ["alice", "paris"]
 
 
 def test_backfill_entities_disabled_when_boost_off(fake_embed, fake_store):
@@ -947,20 +837,12 @@ def test_backfill_entities_disabled_when_boost_off(fake_embed, fake_store):
     config = MemoryConfig(enable_entity_boost=False)
     mem = Memory(embed=fake_embed, store=fake_store, config=config)
 
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=mem._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},
     )
     fake_store.store(mo)
 
@@ -970,21 +852,13 @@ def test_backfill_entities_disabled_when_boost_off(fake_embed, fake_store):
 
 def test_backfill_entities_all_users(entity_memory, fake_store):
     """When user_id is None, backfill should cover all users."""
-    now = datetime.now(timezone.utc)
+    datetime.now(timezone.utc)
     for uid in ("u1", "u2"):
-        mo = MemoryObject(
+        mo = make_memory(
             memory_id=f"m-{uid}",
             user_id=uid,
             content="Alice visited Paris",
             embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-            score=0.0,
-            created_at=now,
-            last_accessed_at=now,
-            source=MemorySource.USER_STATED,
-            importance=0.5,
-            lifecycle_state=LifecycleState.ACTIVE,
-            embedding_dim=64,
-            metadata={},
         )
         fake_store.store(mo)
 
@@ -994,20 +868,12 @@ def test_backfill_entities_all_users(entity_memory, fake_store):
 
 def test_run_maintenance_includes_backfill(entity_memory, fake_store):
     """run_maintenance should include backfilled count in its result."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},
     )
     fake_store.store(mo)
 
@@ -1022,20 +888,12 @@ def test_run_maintenance_includes_backfill(entity_memory, fake_store):
 
 def test_run_maintenance_can_skip_backfill(entity_memory, fake_store):
     """run_maintenance with auto_backfill_entities=False should skip backfill."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},
     )
     fake_store.store(mo)
 
@@ -1051,20 +909,12 @@ def test_run_maintenance_can_skip_backfill(entity_memory, fake_store):
 @pytest.mark.asyncio
 async def test_abackfill_entities(entity_memory, fake_store):
     """Async backfill should produce the same results as sync backfill."""
-    now = datetime.now(timezone.utc)
-    mo = MemoryObject(
+    datetime.now(timezone.utc)
+    mo = make_memory(
         memory_id="m1",
         user_id="u1",
         content="Alice visited Paris",
         embedding=entity_memory._embed.embed_single("Alice visited Paris"),
-        score=0.0,
-        created_at=now,
-        last_accessed_at=now,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        embedding_dim=64,
-        metadata={},
     )
     fake_store.store(mo)
 

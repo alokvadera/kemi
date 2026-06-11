@@ -4,11 +4,14 @@ import sys
 import types
 from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
-from kemi.models import MemoryObject, MemoryType
-from kemi.summarizer import LLMSummarizer
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import MemoryType
+from kemi.nlp.summarizer import LLMSummarizer
+from tests._helpers.factories import make_memory
 
 
 class TestLLMSummarizerInit:
@@ -26,8 +29,8 @@ class TestLLMSummarizerInit:
             LLMSummarizer(provider="custom")
 
     def test_invalid_provider(self) -> None:
-        """Test that invalid provider raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown provider"):
+        """Test that invalid provider raises ConfigurationError."""
+        with pytest.raises(ConfigurationError, match="Unknown provider"):
             LLMSummarizer(provider="nonexistent")
 
     def test_default_prompt_template(self) -> None:
@@ -87,7 +90,7 @@ class TestLLMSummarizerInitClient:
         mock_module = types.SimpleNamespace(OpenAI=mock_openai)
         monkeypatch.setitem(sys.modules, "openai", mock_module)
 
-        summarizer = LLMSummarizer(provider="ollama", api_key="my-key")
+        LLMSummarizer(provider="ollama", api_key="my-key")
         assert captured_kwargs.get("api_key") == "my-key"
 
     def test_openai_provider_model_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,22 +126,22 @@ class TestLLMSummarizerInitClient:
         assert summarizer._effective_model == "claude-3-opus"
 
     def test_openai_import_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that openai provider raises ImportError when package missing."""
+        """Test that openai provider raises ConfigurationError when package missing."""
         monkeypatch.setitem(sys.modules, "openai", None)
-        with pytest.raises(ImportError, match="openai package is required"):
+        with pytest.raises(ConfigurationError, match="openai package is required"):
             LLMSummarizer(provider="openai")
 
     def test_anthropic_import_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that anthropic provider raises ImportError when package missing."""
+        """Test that anthropic provider raises ConfigurationError when package missing."""
         monkeypatch.setitem(sys.modules, "anthropic", None)
-        with pytest.raises(ImportError, match="anthropic package is required"):
+        with pytest.raises(ConfigurationError, match="anthropic package is required"):
             LLMSummarizer(provider="anthropic")
 
     def test_init_client_unknown_provider(self) -> None:
-        """Test _init_client raises ValueError for unknown provider."""
+        """Test _init_client raises ConfigurationError for unknown provider."""
         summarizer = LLMSummarizer(provider="custom", custom_callback=lambda p, **kw: "")
         summarizer._provider = "unknown"
-        with pytest.raises(ValueError, match="Unknown provider"):
+        with pytest.raises(ConfigurationError, match="Unknown provider"):
             summarizer._init_client()
 
 
@@ -359,16 +362,15 @@ class TestLLMSummarizerSummarize:
 @pytest.mark.asyncio
 async def test_llm_summary_integration_with_consolidation(real_db_memory) -> None:
     """Integration test: consolidate_cluster with mock LLM via custom callback."""
-    from datetime import timedelta
-    from kemi import consolidation
-    from kemi.summarizer import LLMSummarizer
-    from kemi.models import MemoryType
+    from kemi.memory import consolidation
+    from kemi.memory.model import MemoryType
+    from kemi.nlp.summarizer import LLMSummarizer
 
     mem = real_db_memory
 
     # Store some old episodic memories
     memory_ids = []
-    for i, content in enumerate([
+    for _i, content in enumerate([
         "User visited the Alps for hiking in summer",
         "User enjoyed skiing in the French Alps",
         "User plans to climb Mont Blanc next year",
@@ -417,10 +419,10 @@ async def test_llm_summary_integration_with_consolidation(real_db_memory) -> Non
 def test_summarizer_integration_custom_callback() -> None:
     """Test that consolidate_cluster works with a custom callback LLM summarizer."""
     from datetime import timedelta
-    from unittest.mock import MagicMock
-    from kemi import consolidation
-    from kemi.summarizer import LLMSummarizer
+
     from kemi.adapters.embedding.custom import CustomEmbedAdapter
+    from kemi.memory import consolidation
+    from kemi.nlp.summarizer import LLMSummarizer
 
     embed = CustomEmbedAdapter(embed_fn=lambda texts: [[0.1] * 32 for _ in texts], dim=32)
 
@@ -429,12 +431,11 @@ def test_summarizer_integration_custom_callback() -> None:
     mock_store.update = MagicMock()
 
     memories = [
-        MemoryObject(
+        make_memory(
             memory_id=f"test-{i}",
             user_id="user1",
             content=f"Related memory {i}",
             embedding=[0.1] * 32,
-            embedding_dim=32,
             memory_type=MemoryType.EPISODIC,
             created_at=datetime.now(timezone.utc) - timedelta(days=100),
             last_accessed_at=datetime.now(timezone.utc) - timedelta(days=100),

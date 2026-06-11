@@ -20,7 +20,8 @@ import os
 from datetime import datetime
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class RedisStorageAdapter(StorageAdapter):
 
     def __init__(self, url: str | None = None, prefix: str = "kemi") -> None:
         if not _REDIS_AVAILABLE:
-            raise ImportError(_REDIS_ERR)
+            raise ConfigurationError(_REDIS_ERR)
         self._prefix = prefix
         self._redis = redis.Redis.from_url(
             url or os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
@@ -233,7 +234,7 @@ class RedisStorageAdapter(StorageAdapter):
         namespace: str = "default",
         session_id: str | None = None,
     ) -> list[MemoryObject]:
-        from kemi.scoring import cosine_similarity
+        from kemi.memory.scoring import cosine_similarity
 
         if lifecycle_filter is None:
             lifecycle_filter = [LifecycleState.ACTIVE, LifecycleState.DECAYING]
@@ -371,5 +372,9 @@ class RedisStorageAdapter(StorageAdapter):
 
     # ── Schema ───────────────────────────────────────────────────────────
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
-        self._redis.set(self._k("schema_version"), str(to_version))
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        to_v = to_version if to_version is not None else 1
+        self._redis.set(self._k("schema_version"), str(to_v))
+        return to_v

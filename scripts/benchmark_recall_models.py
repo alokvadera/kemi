@@ -15,11 +15,12 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 # ── Models to test ────────────────────────────────────────────────────
 # Small, fast models suitable for CI. Each tuple: (name, min_recall_threshold)
@@ -127,7 +128,7 @@ def brute_force_ground_truth(
 
 def compute_recall(embeddings: list[list[float]],
                    queries: list[list[float]],
-                   memory_ids: list[str]) -> dict:
+                   memory_ids: list[str]) -> dict[str, Any]:
     """Benchmark ANN vs brute-force recall using sqlite-vec.
 
     Returns dict with recall metrics.
@@ -213,7 +214,7 @@ def main() -> int:
         # Embed training texts
         print(f"  Embedding training texts... ", end="", flush=True)
         t0 = time.perf_counter()
-        train_embs = []
+        train_embs: list[list[float]] = []
         for emb in model.embed(train_texts):
             train_embs.append(emb.tolist())
         embed_time = time.perf_counter() - t0
@@ -222,7 +223,7 @@ def main() -> int:
 
         # Embed query texts
         print(f"  Embedding query texts... ", end="", flush=True)
-        query_embs = []
+        query_embs: list[list[float]] = []
         for emb in model.embed(query_texts):
             query_embs.append(emb.tolist())
         print(f"{len(query_embs)} done")

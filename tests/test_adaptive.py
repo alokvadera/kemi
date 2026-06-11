@@ -1,6 +1,6 @@
 """Tests for kemi adaptive retrieval module."""
 
-from kemi.adaptive import (
+from kemi.memory.adaptive import (
     AdaptiveRetriever,
     AdaptiveWeights,
     QueryType,

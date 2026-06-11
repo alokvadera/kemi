@@ -259,7 +259,7 @@ def test_event_hooks_raise_on_error_aborts_operation(mock_memory) -> None:
 
 def test_config_hooks_raise_on_error_false_swallows_errors(mock_memory) -> None:
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -275,7 +275,7 @@ def test_config_hooks_raise_on_error_false_swallows_errors(mock_memory) -> None:
 
 def test_config_hooks_raise_on_error_true_aborts_operation(mock_memory) -> None:
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -291,7 +291,7 @@ def test_config_hooks_raise_on_error_true_aborts_operation(mock_memory) -> None:
 def test_post_hook_remember_raise_on_error_true_raises_after_store(mock_memory) -> None:
     """Post-hook failure with hooks_raise_on_error=True raises after side effects."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -313,7 +313,7 @@ def test_post_hook_remember_raise_on_error_true_raises_after_store(mock_memory) 
 def test_post_hook_remember_raise_on_error_false_swallows(mock_memory) -> None:
     """Post-hook failure with hooks_raise_on_error=False is swallowed."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -331,7 +331,7 @@ def test_post_hook_remember_raise_on_error_false_swallows(mock_memory) -> None:
 def test_post_hook_recall_raise_on_error_true_raises_after_results(mock_memory) -> None:
     """Post-hook failure on recall with hooks_raise_on_error=True raises after results are built."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -357,7 +357,7 @@ def test_post_hook_recall_raise_on_error_true_raises_after_results(mock_memory) 
 def test_post_hook_recall_raise_on_error_false_swallows(mock_memory) -> None:
     """Post-hook failure on recall with hooks_raise_on_error=False is swallowed."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -378,7 +378,7 @@ def test_post_hook_recall_raise_on_error_false_swallows(mock_memory) -> None:
 def test_post_hook_update_raise_on_error_true_raises_after_update(mock_memory) -> None:
     """Post-hook failure on update with hooks_raise_on_error=True raises after store is updated."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -402,7 +402,7 @@ def test_post_hook_update_raise_on_error_true_raises_after_update(mock_memory) -
 def test_post_hook_update_raise_on_error_false_swallows(mock_memory) -> None:
     """Post-hook failure on update with hooks_raise_on_error=False is swallowed."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -424,7 +424,7 @@ def test_post_hook_update_raise_on_error_false_swallows(mock_memory) -> None:
 def test_post_hook_forget_raise_on_error_true_raises_after_delete(mock_memory) -> None:
     """Post-hook failure on forget with hooks_raise_on_error=True raises after deletion."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -446,7 +446,7 @@ def test_post_hook_forget_raise_on_error_true_raises_after_delete(mock_memory) -
 def test_post_hook_forget_raise_on_error_false_swallows(mock_memory) -> None:
     """Post-hook failure on forget with hooks_raise_on_error=False is swallowed."""
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -511,7 +511,7 @@ def test_remember_many_fires_pre_and_post_hooks(mock_memory) -> None:
 
 def test_remember_many_pre_hook_abort_stops_batch(mock_memory) -> None:
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -536,7 +536,7 @@ def test_remember_many_pre_hook_abort_stops_batch(mock_memory) -> None:
 
 def test_remember_many_post_hook_abort_after_store(mock_memory) -> None:
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=True)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)
@@ -562,7 +562,7 @@ def test_remember_many_post_hook_abort_after_store(mock_memory) -> None:
 
 def test_remember_many_post_hook_swallowed_when_config_false(mock_memory) -> None:
     from kemi import Memory
-    from kemi.models import MemoryConfig
+    from kemi.memory.model import MemoryConfig
 
     config = MemoryConfig(hooks_raise_on_error=False)
     mem = Memory(embed=mock_memory._embed, store=mock_memory._store, config=config)

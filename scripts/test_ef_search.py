@@ -15,20 +15,20 @@ TOP_K = 10
 RNG = random.Random(42)
 
 
-def cosine_similarity(a, b):
+def cosine_similarity(a: list[float], b: list[float]) -> float:
     dot = sum(x * y for x, y in zip(a, b))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na * nb > 0 else 0
 
 
-def brute_force_ground_truth(embeddings, query):
+def brute_force_ground_truth(embeddings: list[list[float]], query: list[float]) -> set[str]:
     scores = [(cosine_similarity(e, query), i) for i, e in enumerate(embeddings)]
     scores.sort(key=lambda x: -x[0])
     return {f"mem-{idx}" for _, idx in scores[:TOP_K]}
 
 
-def test_with_clusters():
+def test_with_clusters() -> None:
     """Test with structured data (clustered vectors) for realistic recall."""
     print("\n" + "=" * 70)
     print("  With CLUSTERED data (simulating real embeddings)")
@@ -88,13 +88,13 @@ def test_with_clusters():
         avg_recall = statistics.mean(recalls) * 100
         avg_latency = statistics.median(latencies)
         slowdown = avg_latency / latencies[0] if avg_latency > 0 else 0
-        speed_str = f"{slowdown:>9.1f}x" if ef != ef_values[0] else "         -"
+        speed_str = f"{slowdown:>9.1f}x" if ef != 1 else "         -"
         print(f"  {ef:>10} | {avg_recall:>9.1f}% | {avg_latency:>10.2f}ms | {speed_str}")
 
     db2.close()
 
 
-def main():
+def main() -> None:
     print("=" * 70)
     print("  sqlite-vec: ef_search Recall vs Latency Tradeoff")
     print(f"  Scale: {SCALE} vectors, {DIM}-dim, {QUERIES} queries, top-{TOP_K}")

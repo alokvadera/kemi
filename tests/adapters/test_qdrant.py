@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from kemi.adapters.storage.qdrant import QdrantStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 
 @pytest.fixture

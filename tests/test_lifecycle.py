@@ -2,25 +2,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from kemi import lifecycle
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory import lifecycle
+from kemi.memory.model import LifecycleState
+from tests._helpers.factories import make_memory
 
 
 def test_evaluate_lifecycle_active() -> None:
-    mem = MemoryObject(
-        memory_id="test",
-        user_id="user",
-        content="test",
-        embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=None,
-    )
+    mem = make_memory(memory_id="test", user_id="user", content="test", embedding=None)
 
     result = lifecycle.evaluate_lifecycle(mem)
     assert result == LifecycleState.ACTIVE
@@ -28,19 +16,12 @@ def test_evaluate_lifecycle_active() -> None:
 
 def test_evaluate_lifecycle_decaying() -> None:
     old_time = datetime.now(timezone.utc) - timedelta(hours=800)
-    mem = MemoryObject(
+    mem = make_memory(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
-        score=0.0,
-        created_at=old_time,
         last_accessed_at=old_time,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=None,
     )
 
     result = lifecycle.evaluate_lifecycle(mem, decay_threshold_hours=720.0)
@@ -48,39 +29,19 @@ def test_evaluate_lifecycle_decaying() -> None:
 
 
 def test_transition_valid() -> None:
-    mem = MemoryObject(
-        memory_id="test",
-        user_id="user",
-        content="test",
-        embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=None,
-    )
+    mem = make_memory(memory_id="test", user_id="user", content="test", embedding=None)
 
     result = lifecycle.transition(mem, LifecycleState.DECAYING)
     assert result.lifecycle_state == LifecycleState.DECAYING
 
 
 def test_transition_invalid() -> None:
-    mem = MemoryObject(
+    mem = make_memory(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
         lifecycle_state=LifecycleState.ARCHIVED,
-        metadata={},
-        embedding_dim=None,
     )
 
     with pytest.raises(ValueError):
@@ -88,20 +49,7 @@ def test_transition_invalid() -> None:
 
 
 def test_transition_no_mutation() -> None:
-    mem = MemoryObject(
-        memory_id="test",
-        user_id="user",
-        content="test",
-        embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=None,
-    )
+    mem = make_memory(memory_id="test", user_id="user", content="test", embedding=None)
 
     original_state = mem.lifecycle_state
     lifecycle.transition(mem, LifecycleState.DECAYING)
@@ -118,19 +66,12 @@ def test_get_recall_filter() -> None:
 
 
 def test_evaluate_lifecycle_deleted_state() -> None:
-    mem = MemoryObject(
+    mem = make_memory(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
         lifecycle_state=LifecycleState.DELETED,
-        metadata={},
-        embedding_dim=None,
     )
 
     result = lifecycle.evaluate_lifecycle(mem)
@@ -138,19 +79,12 @@ def test_evaluate_lifecycle_deleted_state() -> None:
 
 
 def test_evaluate_lifecycle_archived_state() -> None:
-    mem = MemoryObject(
+    mem = make_memory(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
         lifecycle_state=LifecycleState.ARCHIVED,
-        metadata={},
-        embedding_dim=None,
     )
 
     result = lifecycle.evaluate_lifecycle(mem)
@@ -160,41 +94,65 @@ def test_evaluate_lifecycle_archived_state() -> None:
 def test_evaluate_lifecycle_future_access() -> None:
     from datetime import timedelta
 
-    future = datetime.now(timezone.utc) + timedelta(hours=1)
-    mem = MemoryObject(
-        memory_id="test",
-        user_id="user",
-        content="test",
-        embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=future,
-        source=MemorySource.USER_STATED,
-        importance=0.5,
-        lifecycle_state=LifecycleState.ACTIVE,
-        metadata={},
-        embedding_dim=None,
-    )
+    datetime.now(timezone.utc) + timedelta(hours=1)
+    mem = make_memory(memory_id="test", user_id="user", content="test", embedding=None)
 
     result = lifecycle.evaluate_lifecycle(mem)
     assert result == LifecycleState.ACTIVE
 
 
 def test_transition_decaying_to_active() -> None:
-    mem = MemoryObject(
+    mem = make_memory(
         memory_id="test",
         user_id="user",
         content="test",
         embedding=None,
-        score=0.0,
-        created_at=datetime.now(timezone.utc),
-        last_accessed_at=datetime.now(timezone.utc),
-        source=MemorySource.USER_STATED,
-        importance=0.5,
         lifecycle_state=LifecycleState.DECAYING,
-        metadata={},
-        embedding_dim=None,
     )
 
     result = lifecycle.transition(mem, LifecycleState.ACTIVE)
     assert result.lifecycle_state == LifecycleState.ACTIVE
+
+
+def test_validate_transition_active_to_decaying() -> None:
+    lifecycle.validate_transition(LifecycleState.ACTIVE, LifecycleState.DECAYING)
+
+
+def test_validate_transition_active_to_deleted() -> None:
+    lifecycle.validate_transition(LifecycleState.ACTIVE, LifecycleState.DELETED)
+
+
+def test_validate_transition_active_to_archived() -> None:
+    lifecycle.validate_transition(LifecycleState.ACTIVE, LifecycleState.ARCHIVED)
+
+
+def test_validate_transition_decaying_to_active() -> None:
+    lifecycle.validate_transition(LifecycleState.DECAYING, LifecycleState.ACTIVE)
+
+
+def test_validate_transition_decaying_to_deleted() -> None:
+    lifecycle.validate_transition(LifecycleState.DECAYING, LifecycleState.DELETED)
+
+
+def test_validate_transition_decaying_to_archived() -> None:
+    lifecycle.validate_transition(LifecycleState.DECAYING, LifecycleState.ARCHIVED)
+
+
+def test_validate_transition_archived_is_terminal() -> None:
+    with pytest.raises(ValueError):
+        lifecycle.validate_transition(LifecycleState.ARCHIVED, LifecycleState.ACTIVE)
+
+
+def test_validate_transition_deleted_is_terminal() -> None:
+    with pytest.raises(ValueError):
+        lifecycle.validate_transition(LifecycleState.DELETED, LifecycleState.ACTIVE)
+
+
+def test_validate_transition_archived_to_archived() -> None:
+    with pytest.raises(ValueError):
+        lifecycle.validate_transition(LifecycleState.ARCHIVED, LifecycleState.ARCHIVED)
+
+
+def test_validate_transition_deleted_to_deleted() -> None:
+    with pytest.raises(ValueError):
+        lifecycle.validate_transition(LifecycleState.DELETED, LifecycleState.DELETED)

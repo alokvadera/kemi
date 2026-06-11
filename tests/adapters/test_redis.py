@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 
 def _redis_available() -> tuple[bool, str]:
@@ -279,7 +279,6 @@ class TestRedisStorageAdapter:
 
     def test_init_without_redis_raises(self, monkeypatch) -> None:
         """Importing the module without redis installed should fail at init."""
-        import sys
         from kemi.adapters.storage import redis as redis_mod
 
         monkeypatch.setattr(redis_mod, "_REDIS_AVAILABLE", False)

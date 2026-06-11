@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from kemi.adapters.storage.json import JSONStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 
 @pytest.fixture

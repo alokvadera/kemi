@@ -4,7 +4,9 @@ import sqlite3
 
 import pytest
 
-from kemi.audit import AuditEntry, AuditTrail
+from kemi.infra.audit import AuditEntry, AuditTrail
+
+pytestmark = pytest.mark.slow
 
 
 def _create_memory_db() -> sqlite3.Connection:
@@ -256,7 +258,7 @@ class TestAuditTrail:
         assert len(all_entries) == 3
 
         # Filter with start_time (should get all)
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
         start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         entries = audit.query(start_time=start)
         assert len(entries) == 3
@@ -324,7 +326,6 @@ class TestAuditTrail:
 
     def test_purge_all_sqlite_error(self) -> None:
         """Test purge_all handles sqlite3.Error gracefully."""
-        import sqlite3
 
         conn = _create_memory_db()
         audit = AuditTrail(conn)

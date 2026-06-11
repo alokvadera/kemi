@@ -5,10 +5,10 @@ Tries multiple syntaxes found in different sources to discover what works.
 """
 
 import sqlite3
-import sqlite_vec
+import sqlite_vec  # type: ignore[import]
 
 
-def try_syntax(label, sql, conn):
+def try_syntax(label: str, sql: str, conn: sqlite3.Connection) -> bool:
     try:
         conn.execute(sql)
         print(f"  ✅ {label}")
@@ -18,7 +18,7 @@ def try_syntax(label, sql, conn):
         return False
 
 
-def main():
+def main() -> None:
     print("=" * 60)
     print("  sqlite-vec HNSW Parameter Discovery")
     print("=" * 60)

@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any
 
-from kemi.models import LifecycleState, MemoryObject
+from kemi.memory.model import LifecycleState, MemoryObject
 
 
 class _QueryCache:

@@ -10,7 +10,7 @@ import pytest
 try:
     from fastapi.testclient import TestClient
 
-    from kemi.api_server import create_app
+    from kemi.interfaces.api import create_app
 
     _FASTAPI_AVAILABLE = True
 except ImportError:
@@ -18,7 +18,10 @@ except ImportError:
     TestClient = None  # type: ignore[assignment, misc]
     create_app = None  # type: ignore[assignment, misc]
 
-pytestmark = pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="fastapi not installed")
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(not _FASTAPI_AVAILABLE, reason="fastapi not installed"),
+]
 
 
 @pytest.fixture
@@ -26,7 +29,7 @@ def integration_client(tmp_path, mock_embedding):
     """Create a TestClient backed by a fresh real SQLite Memory instance."""
     from kemi import Memory
     from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-    from kemi.observability import reset_metrics
+    from kemi.infra.observability import reset_metrics
 
     reset_metrics()
     db_path = str(tmp_path / "integration.db")

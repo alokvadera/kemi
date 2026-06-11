@@ -50,9 +50,9 @@ class TestMainCLIFallback:
         """When mcp_server is not importable, main() falls back to cli."""
         mock_cli_main = MagicMock()
 
-        # Make kemi.mcp_server raise ImportError when imported
+        # Make kemi.interfaces.mcp raise ImportError when imported
         with patch.dict(sys.modules, {"kemi.mcp_server": None}):
-            with patch("kemi.cli.main", mock_cli_main):
+            with patch("kemi.interfaces.cli.main", mock_cli_main):
                 import kemi.__main__ as mod
 
                 importlib.reload(mod)
@@ -64,7 +64,7 @@ class TestMainCLIFallback:
     def test_fallback_prints_fallback_message(self):
         """CLI fallback prints a message about MCP not being available."""
         with patch.dict(sys.modules, {"kemi.mcp_server": None}):
-            with patch("kemi.cli.main"):
+            with patch("kemi.interfaces.cli.main"):
                 import kemi.__main__ as mod
 
                 importlib.reload(mod)
@@ -81,7 +81,7 @@ class TestMainCLIFallback:
     def test_fallback_sets_argv0(self):
         """CLI fallback sets sys.argv[0] to 'kemi'."""
         with patch.dict(sys.modules, {"kemi.mcp_server": None}):
-            with patch("kemi.cli.main"):
+            with patch("kemi.interfaces.cli.main"):
                 import kemi.__main__ as mod
 
                 importlib.reload(mod)

@@ -1,11 +1,8 @@
 """Tests for src/kemi/reranker.py — cross-encoder re-ranking."""
 
-import math
 
-import pytest
 
-from kemi import reranker
-from kemi.reranker import (
+from kemi.nlp.reranker import (
     CrossEncoderReranker,
     FallbackReranker,
     NomicReranker,
@@ -14,7 +11,7 @@ from kemi.reranker import (
     fuse_and_rerank,
     rerank_results,
 )
-
+from tests._helpers.factories import make_memory
 
 # ---------------------------------------------------------------------------
 # RerankerConfig
@@ -50,23 +47,14 @@ class TestRerankerConfig:
 
 class TestRerankerResult:
     def test_fields(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="test",
             embedding=[0.1, 0.2],
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=2,
         )
         result = RerankerResult(
             memory=mem,
@@ -90,23 +78,14 @@ class TestFallbackReranker:
 
     def test_exact_term_match_boosts_score(self) -> None:
         reranker = FallbackReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python programming is great",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python", [mem])
         assert len(scored) == 1
@@ -114,23 +93,14 @@ class TestFallbackReranker:
 
     def test_no_query_terms_in_content_low_score(self) -> None:
         reranker = FallbackReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Completely unrelated content xyzabc",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python coding", [mem])
         # Low overlap → lower score
@@ -138,37 +108,21 @@ class TestFallbackReranker:
 
     def test_position_bonus_early_mention(self) -> None:
         reranker = FallbackReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        early = MemoryObject(
+
+        early = make_memory(
             memory_id="early",
             user_id="user",
             content="Python is the best language",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
-        late = MemoryObject(
+        late = make_memory(
             memory_id="late",
             user_id="user",
             content="A language that is Python and great",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored_early = reranker.score("Python", [early])
         scored_late = reranker.score("Python", [late])
@@ -211,69 +165,42 @@ class TestFallbackReranker:
 
     def test_score_with_embed_fn(self) -> None:
         reranker = FallbackReranker(embed_fn=self.embed)
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python programming",
             embedding=self.embed.embed_single("Python programming"),
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python", [mem])
         assert scored[0].cross_encoder_score > 0.0
 
     def test_score_empty_content(self) -> None:
         reranker = FallbackReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python", [mem])
         assert scored[0].cross_encoder_score >= 0.0
 
     def test_score_preserves_bi_encoder_rank(self) -> None:
         reranker = FallbackReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python test",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python", [mem])
         assert scored[0].bi_encoder_rank == 0
@@ -295,23 +222,14 @@ class TestNomicReranker:
     def test_score_falls_back_on_exception(self) -> None:
         # No nomic server running → falls back to FallbackReranker
         reranker = NomicReranker()
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         scored = reranker.score("Python", [mem])
         # Falls back to FallbackReranker → should return valid results
@@ -329,23 +247,14 @@ class TestRerankResults:
         assert result == []
 
     def test_fallback_provider(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         config = RerankerConfig(provider="fallback")
         result = rerank_results([mem], "Python", config)
@@ -354,37 +263,21 @@ class TestRerankResults:
         assert result[0].memory_id == "test"
 
     def test_score_threshold_drops_low_results(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        low_mem = MemoryObject(
+
+        low_mem = make_memory(
             memory_id="low",
             user_id="user",
             content="xyz unrelated content",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
-        high_mem = MemoryObject(
+        high_mem = make_memory(
             memory_id="high",
             user_id="user",
             content="Python programming is great",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         config = RerankerConfig(provider="fallback", score_threshold=0.5)
         result = rerank_results([low_mem, high_mem], "Python", config)
@@ -392,46 +285,28 @@ class TestRerankResults:
         assert len(result) <= 2
 
     def test_unknown_provider_uses_fallback(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="test",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         config = RerankerConfig(provider="unknown-provider")
         result = rerank_results([mem], "test", config)
         assert len(result) == 1
 
     def test_bi_encoder_rank_assigned(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
 
-        mem = MemoryObject(
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="test",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         # rerank_results assigns bi_encoder_rank based on index in input list
         config = RerankerConfig(provider="fallback")
@@ -451,24 +326,15 @@ class TestFuseAndRerank:
         assert result == []
 
     def test_combines_rrf_and_cross_encoder_scores(self) -> None:
-        from kemi.models import MemoryObject
-        from datetime import datetime, timezone
-        from kemi.models import MemorySource
-        from kemi.decomposer import FusionResult
 
-        mem = MemoryObject(
+        from kemi.nlp.decomposer import FusionResult
+
+        mem = make_memory(
             memory_id="test",
             user_id="user",
             content="Python",
             embedding=[0.1] * 64,
-            score=0.0,
-            created_at=datetime.now(timezone.utc),
-            last_accessed_at=datetime.now(timezone.utc),
-            source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=None,
-            metadata={},
-            embedding_dim=64,
         )
         mem.cross_encoder_score = 0.8
 

@@ -8,17 +8,19 @@ from unittest.mock import patch
 import pytest
 
 from kemi import Memory
-from kemi.cli import (
+from kemi.interfaces.cli import (
     decompose_and_recall,
     main,
     preview_chunk,
     rerank_recall,
     rollback_memory,
     show_history,
-    show_version_diff,
 )
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
-from kemi.versions import MemoryVersionStore
+from kemi.memory.model import LifecycleState, MemorySource, MemoryType
+from kemi.memory.versions import MemoryVersionStore
+from tests._helpers.factories import make_memory
+
+pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------
@@ -27,8 +29,8 @@ from kemi.versions import MemoryVersionStore
 
 @pytest.fixture
 def _patch_get_memory(mock_memory: Memory):
-    """Patch kemi.cli.get_memory to return the mock_memory fixture."""
-    with patch("kemi.cli.get_memory", return_value=mock_memory):
+    """Patch kemi.interfaces.cli.get_memory to return the mock_memory fixture."""
+    with patch("kemi.interfaces.cli.main.get_memory", return_value=mock_memory):
         yield
 
 
@@ -55,7 +57,7 @@ class TestCLIChunk:
 
     def test_chunk_multiple_chunks(self, _patch_get_memory, mock_memory: Memory, capsys):
         """chunk with long content produces multiple chunks."""
-        long_text = ". ".join([f"Sentence number {i} with some additional words to make it longer" for i in range(1, 21)])
+        long_text = ". ".join([f"Sentence number {i} with some additional words to make it longer" for i in range(1, 21)])  # noqa: E501
         preview_chunk(
             argparse.Namespace(
                 content=long_text,
@@ -97,7 +99,7 @@ class TestCLIChunk:
 
     def test_chunk_respects_overlap_param(self, _patch_get_memory, mock_memory: Memory, capsys):
         """chunk --overlap controls sentence overlap between chunks."""
-        text = "First sentence here. Second sentence here. Third sentence here. Fourth sentence here. Fifth sentence here."
+        text = "First sentence here. Second sentence here. Third sentence here. Fourth sentence here. Fifth sentence here."  # noqa: E501
         preview_chunk(
             argparse.Namespace(
                 content=text,
@@ -125,11 +127,11 @@ class TestCLIChunk:
 
     def test_chunk_via_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """chunk through main() parses arguments correctly."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "chunk", "A short test sentence.", "--max-tokens", "100", "--overlap", "1"],
+                ["kemi", "chunk", "A short test sentence.", "--max-tokens", "100", "--overlap", "1"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -146,7 +148,7 @@ class TestCLIDecompose:
 
     def test_decompose_simple_query(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose with simple query shows sub-queries."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-1",
             user_id="user1",
             content="I eat breakfast at 8am and dinner at 7pm",
@@ -172,7 +174,7 @@ class TestCLIDecompose:
         assert "breakfast" in captured.out.lower()
         assert "dinner" in captured.out.lower()
 
-    def test_decompose_no_match_shows_no_results(self, _patch_get_memory, mock_memory: Memory, capsys):
+    def test_decompose_no_match_shows_no_results(self, _patch_get_memory, mock_memory: Memory, capsys):  # noqa: E501
         """decompose when no memories match prints 'No memories found'."""
         decompose_and_recall(
             argparse.Namespace(
@@ -190,7 +192,7 @@ class TestCLIDecompose:
 
     def test_decompose_expand_strategy(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose --strategy expand shows expanded variants."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-expand-1",
             user_id="user1",
             content="I eat breakfast every morning",
@@ -215,7 +217,7 @@ class TestCLIDecompose:
 
     def test_decompose_single_subquery(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose with single sub-query skips fusion."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-single-1",
             user_id="user1",
             content="Python is a programming language",
@@ -240,7 +242,7 @@ class TestCLIDecompose:
 
     def test_decompose_via_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose through main() parses arguments correctly."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-e2e-1",
             user_id="user1",
             content="I like cats and dogs",
@@ -249,11 +251,11 @@ class TestCLIDecompose:
         )
         mock_memory._store.store(mem)
 
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
-                ["kemi", "decompose", "user1", "Tell me about cats and dogs", "--strategy", "simple"],
+                ["kemi", "decompose", "user1", "Tell me about cats and dogs", "--strategy", "simple"],  # noqa: E501
             ):
                 main()
         captured = capsys.readouterr()
@@ -262,7 +264,7 @@ class TestCLIDecompose:
 
     def test_decompose_both_strategy(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose --strategy both combines simple and expand."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-both-1",
             user_id="user1",
             content="I work on projects",
@@ -286,7 +288,7 @@ class TestCLIDecompose:
 
     def test_decompose_none_strategy(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose --strategy none returns original query unchanged."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-none-1",
             user_id="user1",
             content="Some memory content",
@@ -310,7 +312,7 @@ class TestCLIDecompose:
 
     def test_decompose_results_show_scores(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose results include score information."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-score-1",
             user_id="user1",
             content="I eat breakfast every morning",
@@ -341,9 +343,9 @@ class TestCLIDecompose:
 class TestCLIRerank:
     """Tests for the rerank CLI command."""
 
-    def test_rerank_shows_initial_recall_count(self, _patch_get_memory, mock_memory: Memory, capsys):
+    def test_rerank_shows_initial_recall_count(self, _patch_get_memory, mock_memory: Memory, capsys):  # noqa: E501
         """rerank prints initial recall count."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="rerank-1",
             user_id="user1",
             content="I love Python programming",
@@ -382,7 +384,7 @@ class TestCLIRerank:
 
     def test_rerank_shows_provider(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rerank output shows the provider name."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="rerank-prov-1",
             user_id="user1",
             content="I enjoy coding in Python",
@@ -406,7 +408,7 @@ class TestCLIRerank:
 
     def test_rerank_via_main(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rerank through main() parses arguments correctly."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="rerank-e2e-1",
             user_id="user1",
             content="I love JavaScript programming",
@@ -415,7 +417,7 @@ class TestCLIRerank:
         )
         mock_memory._store.store(mem)
 
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -428,7 +430,7 @@ class TestCLIRerank:
     def test_rerank_top_k_limits_results(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rerank --top-k limits initial recall set."""
         for i in range(5):
-            mem = MemoryObject(
+            mem = make_memory(
                 memory_id=f"rerank-tk-{i}",
                 user_id="user1",
                 content=f"Memory number {i} about programming",
@@ -472,31 +474,26 @@ class TestCLIVersions:
 
     def test_versions_shows_snapshots(self, _patch_get_memory, mock_memory: Memory, capsys):
         """versions shows recorded version snapshots."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = getattr(mock_memory._store, "_db_path", None)
         if db_path is None:
             pytest.skip("No temp db path available in mock store")
 
         vs = MemoryVersionStore(db_path=db_path)
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="versions-test-1",
             user_id="user1",
             content="v1 content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem, changed_by="update")
@@ -515,7 +512,7 @@ class TestCLIVersions:
 
     def test_versions_via_main_no_db(self, capsys):
         """versions through main() with no db prints message."""
-        with patch("kemi.cli.os.path.exists", return_value=False):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=False):
             with patch.object(sys, "argv", ["kemi", "history", "some-memory-id"]):
                 main()
         captured = capsys.readouterr()
@@ -543,31 +540,26 @@ class TestCLIRollback:
 
     def test_rollback_version_not_found(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rollback to version that doesn't exist prints message."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = getattr(mock_memory._store, "_db_path", None)
         if db_path is None:
             pytest.skip("No temp db path available")
 
         vs = MemoryVersionStore(db_path=db_path)
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="rollback-test-none",
             user_id="user1",
             content="content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem, changed_by="update")
@@ -592,7 +584,7 @@ class TestCLINewCommandsE2E:
 
     def test_chunk_e2e(self, _patch_get_memory, mock_memory: Memory, capsys):
         """chunk through main() works end-to-end."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -604,16 +596,16 @@ class TestCLINewCommandsE2E:
 
     def test_decompose_e2e_with_results(self, _patch_get_memory, mock_memory: Memory, capsys):
         """decompose through main() with matching memories shows results."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="decomp-e2e-results",
             user_id="user1",
             content="I visited Paris last week and London yesterday",
-            embedding=mock_memory._embed.embed_single("I visited Paris last week and London yesterday"),
+            embedding=mock_memory._embed.embed_single("I visited Paris last week and London yesterday"),  # noqa: E501
             embedding_dim=mock_memory._embed.dimension(),
         )
         mock_memory._store.store(mem)
 
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -631,7 +623,7 @@ class TestCLINewCommandsE2E:
 
     def test_rerank_e2e_with_results(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rerank through main() with matching memories shows reranked output."""
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="rerank-e2e-results",
             user_id="user1",
             content="I enjoy hiking in mountains",
@@ -640,7 +632,7 @@ class TestCLINewCommandsE2E:
         )
         mock_memory._store.store(mem)
 
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -653,7 +645,7 @@ class TestCLINewCommandsE2E:
 
     def test_rerank_e2e_empty_results(self, _patch_get_memory, mock_memory: Memory, capsys):
         """rerank through main() with no matching memories prints message."""
-        with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
             with patch.object(
                 sys,
                 "argv",
@@ -674,39 +666,33 @@ class TestCLIVersionsRealDB:
 
     def test_versions_shows_version_history(self, real_db_memory: Memory, capsys):
         """versions command shows recorded version history from real DB."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = real_db_memory._store._db_path
         vs = MemoryVersionStore(db_path=db_path)
 
-        mem = MemoryObject(
+        mem = make_memory(
             memory_id="versions-real-1",
             user_id="user1",
             content="original content version 1",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=["tag1", "tag2"],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem, changed_by="update")
 
-        mem_v2 = MemoryObject(
+        mem_v2 = make_memory(
             memory_id="versions-real-1",
             user_id="user1",
             content="updated content version 2",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
@@ -718,16 +704,16 @@ class TestCLIVersionsRealDB:
             confidence=0.9,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         vs.record_version(mem_v2, changed_by="update")
 
-        # Patch os.path.expanduser in cli module so CLI uses our temp db instead of ~/.kemi/memories.db
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.expanduser",
+        # Patch os.path.expanduser in cli module so CLI uses our temp db instead of
+        # ~/.kemi/memories.db
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.expanduser",
                        lambda x: db_path if "~/.kemi/memories.db" in str(x) else x):
-                with patch("kemi.cli.os.path.exists", return_value=True):
+                with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                     with patch.object(sys, "argv", ["kemi", "history", "versions-real-1"]):
                         main()
         captured = capsys.readouterr()
@@ -740,17 +726,15 @@ class TestCLIVersionsRealDB:
 
     def test_versions_shows_diff(self, real_db_memory: Memory, capsys):
         """versions --diff shows field-level differences between versions."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = real_db_memory._store._db_path
         vs = MemoryVersionStore(db_path=db_path)
 
-        mem_v1 = MemoryObject(
+        mem_v1 = make_memory(
             memory_id="versions-diff-1",
             user_id="user1",
             content="original content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
@@ -762,17 +746,15 @@ class TestCLIVersionsRealDB:
             confidence=0.5,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem_v1, changed_by="update")
 
-        mem_v2 = MemoryObject(
+        mem_v2 = make_memory(
             memory_id="versions-diff-1",
             user_id="user1",
             content="updated content changed",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
@@ -781,18 +763,16 @@ class TestCLIVersionsRealDB:
             metadata={},
             embedding_dim=3,
             tags=["new-tag"],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         vs.record_version(mem_v2, changed_by="update")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.expanduser",
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.expanduser",
                        lambda x: db_path if "~/.kemi/memories.db" in str(x) else x):
-                with patch("kemi.cli.os.path.exists", return_value=True):
+                with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                     with patch.object(
                         sys,
                         "argv",
@@ -804,81 +784,68 @@ class TestCLIVersionsRealDB:
 
     def test_rollback_restores_content(self, real_db_memory: Memory, capsys):
         """rollback command restores memory to previous version's content."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = real_db_memory._store._db_path
         vs = MemoryVersionStore(db_path=db_path)
 
-        mem_current = MemoryObject(
+        mem_current = make_memory(
             memory_id="rollback-real-1",
             user_id="user1",
             content="current version content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         real_db_memory._store.store(mem_current)
 
-        mem_v1 = MemoryObject(
+        mem_v1 = make_memory(
             memory_id="rollback-real-1",
             user_id="user1",
             content="v1 content restored",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem_v1, changed_by="update")
 
-        mem_v2 = MemoryObject(
+        mem_v2 = make_memory(
             memory_id="rollback-real-1",
             user_id="user1",
             content="current version content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         vs.record_version(mem_v2, changed_by="update")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.expanduser",
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.expanduser",
                        lambda x: db_path if "~/.kemi/memories.db" in str(x) else x):
-                with patch("kemi.cli.os.path.exists", return_value=True):
+                with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                     with patch.object(
                         sys,
                         "argv",
@@ -890,82 +857,69 @@ class TestCLIVersionsRealDB:
 
     def test_rollback_via_versions_command(self, real_db_memory: Memory, capsys):
         """versions command shows rollback after rollback is performed."""
-        from kemi.versions import MemoryVersionStore
 
         db_path = real_db_memory._store._db_path
         vs = MemoryVersionStore(db_path=db_path)
 
-        mem_current = MemoryObject(
+        mem_current = make_memory(
             memory_id="rollback-via-versions",
             user_id="user1",
             content="current content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         real_db_memory._store.store(mem_current)
 
-        mem_v1 = MemoryObject(
+        mem_v1 = make_memory(
             memory_id="rollback-via-versions",
             user_id="user1",
             content="v1 old content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=1,
         )
         vs.record_version(mem_v1, changed_by="update")
 
-        mem_v2 = MemoryObject(
+        mem_v2 = make_memory(
             memory_id="rollback-via-versions",
             user_id="user1",
             content="current content",
             embedding=[0.1, 0.2, 0.3],
-            score=0.0,
             created_at=datetime.now(timezone.utc),
             last_accessed_at=datetime.now(timezone.utc),
             source=MemorySource.USER_STATED,
-            importance=0.5,
             lifecycle_state=LifecycleState.ACTIVE,
             metadata={},
             embedding_dim=3,
             tags=[],
-            confidence=1.0,
             memory_type=MemoryType.EPISODIC,
             session_id=None,
-            namespace="default",
             version=2,
         )
         vs.record_version(mem_v2, changed_by="update")
 
         # Perform rollback
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.expanduser",
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.expanduser",
                        lambda x: db_path if "~/.kemi/memories.db" in str(x) else x):
-                with patch("kemi.cli.os.path.exists", return_value=True):
+                with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                     with patch.object(
                         sys,
                         "argv",
@@ -975,10 +929,10 @@ class TestCLIVersionsRealDB:
         capsys.readouterr()  # discard rollback output
 
         # Now check versions — should show the new rollback version
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.expanduser",
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.expanduser",
                        lambda x: db_path if "~/.kemi/memories.db" in str(x) else x):
-                with patch("kemi.cli.os.path.exists", return_value=True):
+                with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                     with patch.object(
                         sys,
                         "argv",
@@ -992,8 +946,8 @@ class TestCLIVersionsRealDB:
 
     def test_chunk_with_real_db(self, real_db_memory: Memory, capsys):
         """chunk command works with real database backend."""
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(
                     sys,
                     "argv",
@@ -1012,8 +966,8 @@ class TestCLIVersionsRealDB:
         """decompose command works with real database backend."""
         real_db_memory.remember("user1", "I eat breakfast and dinner every day")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(
                     sys,
                     "argv",
@@ -1033,8 +987,8 @@ class TestCLIVersionsRealDB:
         real_db_memory.remember("user1", "I love Python programming")
         real_db_memory.remember("user1", "I enjoy hiking in mountains")
 
-        with patch("kemi.cli.get_memory", return_value=real_db_memory):
-            with patch("kemi.cli.os.path.exists", return_value=True):
+        with patch("kemi.interfaces.cli.main.get_memory", return_value=real_db_memory):
+            with patch("kemi.interfaces.cli.main.os.path.exists", return_value=True):
                 with patch.object(
                     sys,
                     "argv",

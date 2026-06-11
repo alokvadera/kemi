@@ -2,8 +2,8 @@
 
 import pytest
 
-from kemi import decomposer
-from kemi.decomposer import (
+from kemi.exceptions import ConfigurationError
+from kemi.nlp.decomposer import (
     FusionResult,
     QueryDecompositionStrategy,
     SimpleDecomposition,
@@ -12,7 +12,6 @@ from kemi.decomposer import (
     fused_recall,
     rerank_with_reranker,
 )
-
 
 # ---------------------------------------------------------------------------
 # QueryDecompositionStrategy (base class)
@@ -59,21 +58,21 @@ class TestSimpleDecomposition:
         assert len(result) == 1
 
     def test_reconstruct_query_adds_prefix(self) -> None:
-        result = self.strat.decompose("tasks")
+        self.strat.decompose("tasks")
         # Single word 'tasks' has no conjunction, returns as-is → no prefix test
         # Test via decompose: 'schedules' alone also returns as-is
         # The prefix is added by _reconstruct_query for non-question-word clauses
         # For 'work meetings' (no conjunction) it returns as-is since no conjunction was found
-        result2 = self.strat.decompose("do my work")
+        self.strat.decompose("do my work")
         # 'do my work' starts with 'do' which is in question_words → no prefix
         # But 'my work' (after split on 'and') starts with 'my' → prefix added
         # Actually 'my work' has only 2 words so passes >=2 filter
         # Let's directly test the internal method
-        from kemi.decomposer import SimpleDecomposition
+        from kemi.nlp.decomposer import SimpleDecomposition
         strat = SimpleDecomposition()
         # 'meetings' alone starts with 'meetings' (not a question word) → prefix added
         prefix_result = strat._reconstruct_query("meetings")
-        assert "Tell me about" in prefix_result, f"Expected 'Tell me about' prefix, got {prefix_result!r}"
+        assert "Tell me about" in prefix_result, f"Expected 'Tell me about' prefix, got {prefix_result!r}"  # noqa: E501
 
     def test_no_conjunction_returns_original(self) -> None:
         text = "What did I eat for breakfast?"
@@ -163,11 +162,11 @@ class TestDecomposeQuery:
         assert len(result.sub_queries) <= 5
 
     def test_invalid_strategy_raises(self) -> None:
-        with pytest.raises(ValueError, match="Unknown decomposition strategy"):
+        with pytest.raises(ConfigurationError, match="Unknown decomposition strategy"):
             decompose_query("test", strategy="invalid")
 
     def test_returns_decomposed_query_dataclass(self) -> None:
-        from kemi.decomposer import DecomposedQuery
+        from kemi.nlp.decomposer import DecomposedQuery
         result = decompose_query("test query", strategy="simple")
         assert isinstance(result, DecomposedQuery)
         assert hasattr(result, "strategy")
@@ -190,7 +189,6 @@ class TestFusedRecall:
         assert result == []
 
     def test_single_sub_query_returns_memory_recall(self, mock_memory) -> None:
-        from kemi.decomposer import FusionResult
         mock_memory.remember("user1", "Python is great")
         result = fused_recall(mock_memory, "user1", ["Python"], top_k=3)
         assert len(result) >= 1
@@ -226,7 +224,7 @@ class TestFusedRecall:
         result = fused_recall(mock_memory, "user1", ["cats", "dogs"], top_k=3)
         if len(result) >= 2:
             # "both cats and dogs" appears in both results → should rank high
-            ids = [fr.memory.memory_id for fr in result]
+            [fr.memory.memory_id for fr in result]
             both_mem = next(
                 (fr.memory for fr in result
                  if "both" in fr.memory.content.lower()),
@@ -258,7 +256,6 @@ class TestFusedRecall:
 
 class TestRerankWithReranker:
     def test_returns_original_results_unchanged(self, mock_memory) -> None:
-        from kemi.models import MemoryObject
         mock_memory.remember("user1", "Python is great")
         results = mock_memory.recall("user1", "Python")
         reranked = rerank_with_reranker(mock_memory, "user1", "Python", results)

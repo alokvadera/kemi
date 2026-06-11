@@ -1,11 +1,12 @@
 """Tests for procedural memory helpers."""
 
 import hashlib
+
 import pytest
 
-from kemi import Memory, remember_procedure, recall_procedures
+from kemi import Memory, recall_procedures, remember_procedure
 from kemi.adapters.base import EmbeddingAdapter, StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemoryType
+from kemi.memory.model import LifecycleState, MemoryObject, MemoryType
 
 
 class _FakeEmbed(EmbeddingAdapter):
@@ -71,7 +72,7 @@ class _FakeStore(StorageAdapter):
         session_id: str | None = None,
     ) -> list[MemoryObject]:
         # Brute-force cosine similarity
-        from kemi.scoring import cosine_similarity
+        from kemi.memory.scoring import cosine_similarity
 
         candidates = self.get_all_by_user(
             user_id, lifecycle_filter=lifecycle_filter, namespace=namespace, session_id=session_id
@@ -110,7 +111,7 @@ class _FakeStore(StorageAdapter):
         namespace: str = "default",
         session_id: str | None = None,
     ) -> list[MemoryObject]:
-        from kemi.scoring import bm25_score
+        from kemi.memory.scoring import bm25_score
 
         candidates = self.get_all_by_user(
             user_id, lifecycle_filter=lifecycle_filter, namespace=namespace, session_id=session_id

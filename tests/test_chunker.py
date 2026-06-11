@@ -1,11 +1,9 @@
 """Tests for src/kemi/chunker.py — semantic text chunking."""
 
-from datetime import datetime, timezone
 
 import pytest
 
-from kemi import chunker
-from kemi.chunker import (
+from kemi.memory.chunker import (
     CHUNK_META_KEY,
     Chunk,
     ChunkInfo,
@@ -15,8 +13,6 @@ from kemi.chunker import (
     semantic_chunks,
     split_into_sentences,
 )
-from kemi.models import LifecycleState, MemoryObject, MemorySource
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -150,7 +146,7 @@ class TestIsSentenceBoundary:
         # "Dr." ends with abbreviation → next_cap=True but abbrev check prevents boundary
         # For Dr. the first word is "dr." which IS in abbreviations
         result_dr = _is_sentence_boundary("Dr. Smith", "Next sentence")
-        # For e.g. the prev_lower ends with "e.g." which IS in abbreviations  
+        # For e.g. the prev_lower ends with "e.g." which IS in abbreviations
         result_eg = _is_sentence_boundary("e.g. data", "Another point")
         # Both should be False (abbreviation detected, boundary suppressed)
         assert not result_dr, "Dr. is an abbreviation and should not trigger boundary"
@@ -257,7 +253,7 @@ class TestSemanticChunks:
             text, embed, max_tokens=50, overlap_sentences=1
         )
         # With no overlap, same config
-        chunks_no_overlap = semantic_chunks(
+        semantic_chunks(
             text, embed, max_tokens=50, overlap_sentences=0
         )
         # Overlap may cause more/same chunks or different boundaries
@@ -397,3 +393,76 @@ class TestChunkMetaKey:
     def test_chunk_meta_key_is_string(self) -> None:
         assert isinstance(CHUNK_META_KEY, str)
         assert CHUNK_META_KEY == "_chunk_info"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+class TestChunkerEdgeCases:
+    def test_single_sentence_exceeds_max_tokens(self) -> None:
+        """A single very long sentence should still form one chunk even if it exceeds max_tokens."""
+        text = "word " * 500 + "."
+        chunks = semantic_chunks(text, MockEmbed(), max_tokens=20)
+        assert len(chunks) == 1
+        assert chunks[0].chunk_info.total_chunks == 1
+
+    def test_all_similar_sentences_no_strong_boundary(self) -> None:
+        """When all sentences are semantically similar, boundary strength stays low."""
+        text = "The cat sat. The cat sat. The cat sat. The cat sat."
+        chunks = semantic_chunks(text, MockEmbed(), max_tokens=200, similarity_threshold=0.99)
+        # With very high threshold, most boundaries are weak → fewer chunks
+        assert len(chunks) >= 1
+
+    def test_all_different_sentences_many_boundaries(self) -> None:
+        """When sentences are very different, many strong boundaries form."""
+        text = (
+            "Quantum physics is fascinating. "
+            "Baking bread requires patience. "
+            "Mount Everest is the highest peak. "
+            "Python is a programming language. "
+            "The Renaissance began in Italy. "
+            "Ocean tides follow lunar cycles. "
+            "Stock markets react to news. "
+            "Photosynthesis converts light energy."
+        )
+        chunks = semantic_chunks(text, MockEmbed(), max_tokens=30, similarity_threshold=0.1)
+        # With very low threshold, almost every boundary is strong → more chunks
+        assert len(chunks) >= 2
+
+    def test_text_with_only_abbreviations(self) -> None:
+        """Text with abbreviations should still be processed without crashing."""
+        text = "Dr. Smith visited the museum. Mr. Doe attended later."
+        result = split_into_sentences(text)
+        # The regex may split on abbreviations; just verify we get reasonable output
+        assert len(result) >= 1
+        assert any("Dr." in s for s in result)
+
+    def test_split_empty_after_processing(self) -> None:
+        """Edge case: input that becomes empty after sentence processing."""
+        # This is hard to trigger naturally; test the direct path instead
+        assert semantic_chunks("   \n\n   ", MockEmbed()) == []
+
+    def test_zero_max_tokens(self) -> None:
+        """max_tokens=0 should cause every sentence to exceed and form its own chunk."""
+        text = "One. Two. Three."
+        chunks = semantic_chunks(text, MockEmbed(), max_tokens=0)
+        assert len(chunks) == 3
+
+    def test_chunk_info_with_none_parent_id(self) -> None:
+        info = ChunkInfo(
+            chunk_index=0,
+            total_chunks=1,
+            parent_memory_id=None,
+            overlap_with_prev=0,
+            overlap_with_next=0,
+            boundary_strength=1.0,
+        )
+        d = info.to_dict()
+        assert d["parent_memory_id"] is None
+
+    def test_chunk_with_empty_content(self) -> None:
+        chunk = Chunk(content="")
+        assert len(chunk) == 0
+        assert chunk.word_count() == 0
+        assert chunk.token_count_estimate() == 0

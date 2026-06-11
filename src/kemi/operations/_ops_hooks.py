@@ -3,28 +3,35 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
+
+from kemi.exceptions import ValidationError
 
 if TYPE_CHECKING:
-    from kemi._memory_impl import Memory
+    from kemi.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
 
-def add(memory: "Memory", phase: str, callback: Callable[..., Any]) -> None:
+def add(memory: MemoryService, phase: str, callback: Callable[..., Any]) -> None:
     """Register an event hook callback.
+
+    Adds the callback to the default :class:`HookSink` (which shares the
+    legacy ``_event_hooks`` dict), so legacy and registry paths see the
+    same hooks.
 
     Args:
         phase: "pre" or "post" — called before or after the operation.
         callback: Callable that receives (operation, **kwargs).
     """
     if phase not in ("pre", "post"):
-        raise ValueError("phase must be 'pre' or 'post'")
+        raise ValidationError("phase must be 'pre' or 'post'")
     memory._event_hooks[phase].append(callback)
 
 
 def remove(
-    memory: "Memory", phase: str, callback: Callable[..., Any]
+    memory: MemoryService, phase: str, callback: Callable[..., Any]
 ) -> bool:
     """Remove a previously registered event hook callback.
 
@@ -37,7 +44,7 @@ def remove(
 
 
 def run(
-    memory: "Memory",
+    memory: MemoryService,
     phase: str,
     operation: str,
     *,
@@ -56,14 +63,10 @@ def run(
     """
     if raise_on_error is None:
         raise_on_error = memory._config.hooks_raise_on_error
-    for hook in memory._event_hooks.get(phase, []):
-        try:
-            hook(operation, **kwargs)
-        except Exception:
-            # Broad catch: hooks are user code, so any error is their fault.
-            # Honour the configured raise_on_error flag.
-            if raise_on_error:
-                raise
-            logger.warning(
-                f"Event hook failed for {phase}:{operation}", exc_info=True
-            )
+    for sink in memory._plugins.hook_sinks:
+        sink.run(
+            phase,
+            operation,
+            raise_on_error=bool(raise_on_error),
+            **kwargs,
+        )

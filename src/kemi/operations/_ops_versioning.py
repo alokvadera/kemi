@@ -9,18 +9,18 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from kemi.versions import DiffResult, MemoryVersionStore, RollbackResult, VersionSnapshot
+from kemi.memory.versions import DiffResult, MemoryVersionStore, RollbackResult, VersionSnapshot
 
 if TYPE_CHECKING:
-    from kemi._memory_impl import Memory
+    from kemi.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
 
 def configure(
-    memory: "Memory",
+    memory: MemoryService,
     db_path: str | None,
     max_versions_per_memory: int,
     auto_prune_versions: bool,
@@ -28,7 +28,7 @@ def configure(
     """Enable memory version history tracking."""
     if db_path is None:
         try:
-            db_path = memory._store._db_path  # type: ignore[attr-defined]
+            db_path = memory._store._db_path
         except AttributeError:
             logger.warning("Cannot determine database path for version store")
             return
@@ -45,21 +45,25 @@ def configure(
         logger.warning("Failed to initialise version store: %s", e)
 
 
-def get_store(memory: "Memory") -> MemoryVersionStore:
-    """Get or lazily initialise the version store."""
+def get_store(memory: MemoryService) -> MemoryVersionStore | None:
+    """Get or lazily initialise the version store.
+
+    Returns ``None`` when the storage adapter has no persistent database
+    path (e.g. in-memory mock adapters) so callers can skip versioning.
+    """
     if memory._version_store is None:
         db_path: str | None
         try:
-            db_path = memory._store._db_path  # type: ignore[attr-defined]
+            db_path = memory._store._db_path
         except AttributeError:
-            # No persistent path — use in-memory DB so in-process operations work.
-            db_path = ":memory:"
+            # No persistent path — skip versioning for non-SQLite stores.
+            return None
         memory._version_store = MemoryVersionStore(db_path=db_path)
     return memory._version_store
 
 
 def get_history(
-    memory: "Memory",
+    memory: MemoryService,
     memory_id: str,
     limit: int = 100,
 ) -> list[VersionSnapshot]:
@@ -74,7 +78,7 @@ def get_history(
 
 
 def diff(
-    memory: "Memory",
+    memory: MemoryService,
     memory_id: str,
     from_version: int,
     to_version: int,
@@ -95,7 +99,7 @@ def diff(
 
 
 def rollback(
-    memory: "Memory",
+    memory: MemoryService,
     memory_id: str,
     target_version: int,
 ) -> RollbackResult | None:
@@ -117,7 +121,7 @@ def rollback(
         return None
 
 
-def auto_prune(memory: "Memory", memory_id: str) -> None:
+def auto_prune(memory: MemoryService, memory_id: str) -> None:
     """Prune old versions for a memory if auto-prune is enabled."""
     if not memory._auto_prune_versions or memory._version_store is None:
         return

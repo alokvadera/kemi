@@ -14,8 +14,9 @@ Measures:
 
 import gc
 import json
-import math
+
 import random
+from typing import Any
 import sys
 import time
 from datetime import datetime, timezone
@@ -25,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 
 DIM = 384
 SCALES = [1000, 5000, 10000, 25000]
@@ -34,7 +35,7 @@ TOP_K = 10
 RNG = random.Random(42)
 
 
-def make_memory(memory_id, user_id, embedding):
+def make_memory(memory_id: str, user_id: str, embedding: list[float]) -> MemoryObject:
     return MemoryObject(
         memory_id=memory_id,
         user_id=user_id,
@@ -52,13 +53,20 @@ def make_memory(memory_id, user_id, embedding):
     )
 
 
-def random_embedding():
+def random_embedding() -> list[float]:
     return [RNG.random() for _ in range(DIM)]
 
 
-def benchmark_adapter(adapter_cls, label, scale, embeddings, query_embs, **kwargs):
+def benchmark_adapter(
+    adapter_cls: type[SQLiteStorageAdapter] | type[SQLiteVecStorageAdapter],
+    label: str,
+    scale: int,
+    embeddings: list[list[float]],
+    query_embs: list[list[float]],
+    **kwargs: Any,
+) -> tuple[float, list[float]]:
     """Benchmark insert + query for one adapter at one scale using :memory: DB."""
-    adapter_kwargs = {"db_path": ":memory:"}
+    adapter_kwargs: dict[str, Any] = {"db_path": ":memory:"}
     if adapter_cls is SQLiteVecStorageAdapter:
         adapter_kwargs["embedding_dim"] = DIM
         adapter_kwargs.update(kwargs)
@@ -70,7 +78,7 @@ def benchmark_adapter(adapter_cls, label, scale, embeddings, query_embs, **kwarg
         adapter.store(make_memory(f"warmup-{i}", user_id, embeddings[i]))
     adapter.delete_by_user(user_id)
     if hasattr(adapter, '_pending_count'):
-        adapter._pending_count = None
+        setattr(adapter, '_pending_count', None)
 
     mems = [make_memory(f"mem-{label}-{scale}-{i}", user_id, emb)
             for i, emb in enumerate(embeddings)]
@@ -104,7 +112,7 @@ def benchmark_adapter(adapter_cls, label, scale, embeddings, query_embs, **kwarg
     return insert_time, query_times[1:] if len(query_times) > 1 else query_times
 
 
-def main():
+def main() -> None:
     if not _SQLITE_VEC_AVAILABLE:
         print("ERROR: sqlite-vec must be installed.")
         sys.exit(1)
@@ -115,7 +123,7 @@ def main():
     print(f"  Dim: {DIM}  |  Top-K: {TOP_K}  |  Queries: {QUERIES_PER_SCALE}")
     print()
 
-    results = {"brute_force": [], "ann_direct": [], "ann_lazy": []}
+    results: dict[str, list[dict[str, Any]]] = {"brute_force": [], "ann_direct": [], "ann_lazy": []}
 
     for scale in SCALES:
         print(f"  ─── Scale: {scale:,} vectors ───")
@@ -187,7 +195,7 @@ def main():
         x = np.arange(len(scales_str))
         width = 0.25
 
-        fig, ax = plt.subplots(figsize=(10, 6))
+        _fig, ax = plt.subplots(figsize=(10, 6))
 
         brute_ins = [r["insert_s"] for r in results["brute_force"]]
         direct_ins = [r["insert_s"] for r in results["ann_direct"]]

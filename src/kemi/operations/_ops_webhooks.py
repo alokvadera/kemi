@@ -5,37 +5,46 @@ These free functions are called by the corresponding ``Memory`` methods.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from kemi.webhooks import WebhookDispatcher, WebhookEventType, WebhookStore, build_payload
+from kemi.infra.webhooks import WebhookDispatcher, WebhookEventType, WebhookStore, build_payload
+from kemi.plugins import WebhookDispatcherSink
 
 if TYPE_CHECKING:
-    from kemi._memory_impl import Memory
+    from kemi.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
 
-def configure(memory: "Memory", db_path: str | None) -> None:
-    """Enable webhook dispatch for memory lifecycle events."""
+def configure(memory: MemoryService, db_path: str | None = None) -> None:
+    """Enable webhook dispatch for memory lifecycle events.
+
+    Creates a :class:`kemi.infra.webhooks.WebhookDispatcher` backed by a
+    :class:`kemi.infra.webhooks.WebhookStore`, wraps it in a
+    :class:`kemi.plugins.WebhookDispatcherSink`, and appends the sink to
+    the plugin registry. The legacy ``memory._webhook_dispatcher`` is
+    also populated for backward compatibility.
+    """
     if db_path is None:
         try:
-            db_path = memory._store._db_path  # type: ignore[attr-defined]
+            db_path = memory._store._db_path
         except AttributeError:
             logger.warning("Cannot determine database path for webhook store")
             return
 
     try:
         store = WebhookStore(db_path=db_path)
-        memory._webhook_dispatcher = WebhookDispatcher(store=store)
+        dispatcher = WebhookDispatcher(store=store)
+        memory._webhook_dispatcher = dispatcher
+        memory._plugins.webhook_sinks.append(WebhookDispatcherSink(dispatcher))
         logger.info("Webhook dispatcher initialized (db: %s)", db_path)
     except (OSError, ValueError) as e:
         logger.warning("Failed to initialise webhook dispatcher: %s", e)
 
 
 def dispatch(
-    memory: "Memory",
+    memory: MemoryService,
     event: WebhookEventType,
     memory_id: str,
     user_id: str,
@@ -43,12 +52,13 @@ def dispatch(
     previous_state: dict[str, Any] | None = None,
     **extra: Any,
 ) -> None:
-    """Dispatch a webhook event if a dispatcher is configured.
+    """Dispatch a webhook event to every :class:`WebhookSink` in the registry.
 
-    Prefers async dispatch when an event loop is running; falls back to
-    synchronous dispatch otherwise (e.g. CLI commands).
+    The payload is built once and fanned out to all registered sinks. Each
+    sink is responsible for its own transport (HTTP, queue, stdout, etc.)
+    and for choosing sync vs. async delivery internally.
     """
-    if memory._webhook_dispatcher is None:
+    if not memory._plugins.webhook_sinks:
         return
     try:
         payload = build_payload(
@@ -63,27 +73,12 @@ def dispatch(
         logger.warning("Webhook payload build failed for %s: %s", event.value, e)
         return
 
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # No event loop — fall back to sync dispatch.
+    for sink in memory._plugins.webhook_sinks:
         try:
-            memory._webhook_dispatcher.dispatch_sync(payload, event)
+            sink.send(event, payload)
         except Exception:
-            # Broad catch: webhook transports vary (HTTP, CLI subprocess, etc.)
-            # Log and continue; webhooks must never break the calling operation.
+            # Broad catch: webhook transports vary (HTTP, queue, custom)
+            # and must never break the calling operation.
             logger.warning(
-                "Sync webhook dispatch failed for %s", event.value, exc_info=True
+                "Webhook sink dispatch failed for %s", event.value, exc_info=True
             )
-        return
-
-    # Running event loop — fire-and-forget.
-    try:
-        asyncio.ensure_future(
-            memory._webhook_dispatcher.dispatch_async(payload, event)
-        )
-    except Exception:
-        # Broad catch: ensure_future can raise if loop is closing, etc.
-        logger.warning(
-            "Async webhook dispatch failed for %s", event.value, exc_info=True
-        )

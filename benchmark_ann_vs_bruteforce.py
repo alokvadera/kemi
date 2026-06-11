@@ -19,7 +19,7 @@ os.environ["COVERAGE_FILE"] = "/dev/null"
 
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
 from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
 from datetime import datetime, timezone
 
 DIM = 384

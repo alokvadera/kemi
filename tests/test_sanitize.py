@@ -1,4 +1,4 @@
-from kemi import sanitize
+from kemi.memory import sanitize
 
 
 def test_is_suspicious_injection() -> None:

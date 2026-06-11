@@ -3,10 +3,17 @@ try:
 
     __version__ = _version("kemi")
 except (ImportError, AttributeError):  # pragma: no cover
-    __version__ = "0.3.0"
+    __version__ = "0.4.0"
 
-from kemi.core import Memory
-from kemi.memory_formation import (
+from kemi.core import Memory, MemoryService
+from kemi.exceptions import CompatibilityError
+from kemi.memory.entities import (
+    EntityLinker,
+    NoopEntityLinker,
+    RegexEntityLinker,
+    SpacyEntityLinker,
+)
+from kemi.memory.formation import (
     CandidateMemory,
     LLMMemoryExtractor,
     OpenAIMemoryExtractor,
@@ -15,17 +22,40 @@ from kemi.memory_formation import (
     extract_memories,
     remember_from_conversation,
 )
-from kemi.entities import EntityLinker, NoopEntityLinker, RegexEntityLinker, SpacyEntityLinker
-from kemi.models import LifecycleState, MemoryConfig, MemoryObject, MemorySource, MemoryType
-from kemi.procedures import remember_procedure, recall_procedures
+from kemi.memory.model import LifecycleState, MemoryConfig, MemoryObject, MemorySource, MemoryType
+from kemi.memory.procedures import recall_procedures, remember_procedure
+from kemi.plugins import (
+    KEMI_PROTOCOL_VERSION,
+    AuditSink,
+    AuditTrailSink,
+    CallbackHookSink,
+    HookSink,
+    LruQueryCache,
+    PluginRegistry,
+    QueryCacheProvider,
+    WebhookDispatcherSink,
+    WebhookSink,
+)
 
 __all__ = [
     "Memory",
+    "MemoryService",
     "MemoryConfig",
     "MemoryObject",
     "MemorySource",
     "LifecycleState",
     "MemoryType",
+    "PluginRegistry",
+    "WebhookSink",
+    "AuditSink",
+    "QueryCacheProvider",
+    "HookSink",
+    "WebhookDispatcherSink",
+    "AuditTrailSink",
+    "LruQueryCache",
+    "CallbackHookSink",
+    "KEMI_PROTOCOL_VERSION",
+    "CompatibilityError",
     "CandidateMemory",
     "extract_memories",
     "remember_from_conversation",

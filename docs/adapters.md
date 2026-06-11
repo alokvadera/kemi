@@ -172,7 +172,7 @@ memory = Memory(store=storage)
 
 ```python
 from kemi.adapters.base import StorageAdapter
-from kemi.models import MemoryObject, LifecycleState
+from kemi.memory.model import MemoryObject, LifecycleState
 from typing import Optional
 
 class MyStorageAdapter(StorageAdapter):

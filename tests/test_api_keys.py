@@ -1,13 +1,15 @@
 """Tests for src/kemi/api_keys.py"""
 
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from kemi.api_keys import (
+from kemi.exceptions import ConfigurationError
+from kemi.infra.api_keys import (
+    KEY_PREFIX,
     APIKey,
     APIKeyManager,
-    KEY_PREFIX,
     _generate_key_id,
     _generate_raw_key,
     _hash_key,
@@ -58,15 +60,33 @@ class TestHelpers:
         assert kid.startswith("kmi_")
         assert len(kid) == 12  # "kmi_" + 8 hex chars
 
-    def test_hash_key_is_sha256_hex(self):
+    def test_hash_key_format(self):
         raw = "kemi_test_key_123"
         hashed = _hash_key(raw)
-        assert len(hashed) == 64
-        assert all(c in "0123456789abcdef" for c in hashed)
+        parts = hashed.split(":")
+        assert len(parts) == 2  # fast_hash : bcrypt_hash
+        assert all(c in "0123456789abcdef" for c in parts[0])
+        assert len(parts[0]) == 64  # HMAC-SHA256 hex
+        assert parts[1].startswith("$2")  # bcrypt hash prefix ($2b$, $2a$, $2y$)
 
-    def test_hash_key_deterministic(self):
+    def test_hash_key_verify_roundtrip(self):
+        from kemi.infra.api_keys import _verify_key
         raw = "kemi_test_key_123"
-        assert _hash_key(raw) == _hash_key(raw)
+        hashed = _hash_key(raw)
+        assert _verify_key(raw, hashed) is True
+        assert _verify_key("wrong_key", hashed) is False
+
+    def test_fast_hash_uses_pepper(self):
+        from kemi.infra.api_keys import _fast_hash
+        raw = "kemi_test_key_123"
+        h1 = _fast_hash(raw)
+        assert len(h1) == 64
+        # Same raw key with same pepper must produce same fast_hash
+        h2 = _fast_hash(raw)
+        assert h1 == h2
+        # Different raw key must produce different fast_hash
+        h3 = _fast_hash("kemi_different_key")
+        assert h1 != h3
 
     def test_make_expiry_none(self):
         assert make_expiry(None) is None
@@ -248,21 +268,22 @@ class TestCreateKey:
         # First create a key normally
         mgr.create_key(user_id="alice", name="first")
 
-        # Patch _generate_raw_key to return the same value again
-        # This is extremely unlikely naturally, but we can force it
-        # by directly inserting a duplicate hashed_key instead.
-        from kemi.api_keys import _generate_raw_key as orig_gen
-        monkeypatch.setattr("kemi.api_keys._generate_raw_key", lambda: "kemi_collision_test")
+        # Patch _generate_raw_key to return a fixed value and _hash_key
+        # to return a fixed hash so we can force a collision.
+        monkeypatch.setattr("kemi.infra.api_keys._generate_raw_key", lambda: "kemi_collision_test")
+        monkeypatch.setattr(
+            "kemi.infra.api_keys._hash_key",
+            lambda _raw: "fixed_hash_for_collision",
+        )
 
         # Pre-insert a row with the same hashed_key to force collision
-        hashed = _hash_key("kemi_collision_test")
         mgr._conn.execute(
-            "INSERT INTO api_keys (key_id, user_id, hashed_key, name, created_at) VALUES (?, ?, ?, ?, ?)",
-            ("kmi_collide", "bob", hashed, "collision", datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO api_keys (key_id, user_id, hashed_key, name, created_at) VALUES (?, ?, ?, ?, ?)",  # noqa: E501
+            ("kmi_collide", "bob", "fixed_hash_for_collision", "collision", datetime.now(timezone.utc).isoformat()),  # noqa: E501
         )
         mgr._conn.commit()
 
-        with pytest.raises(RuntimeError, match="Failed to create API key"):
+        with pytest.raises(ConfigurationError, match="Failed to create API key"):
             mgr.create_key(user_id="alice", name="second")
 
 
@@ -297,23 +318,56 @@ class TestLookup:
         key = mgr.create_key(user_id="alice", name="expired", expires_at=past)
         assert mgr.lookup(key.raw_key) is None
 
-    def test_lookup_updates_last_used_at(self, mgr):
+    def test_lookup_does_not_update_last_used_at(self, mgr):
+        """Per-request last_used_at write was removed to avoid SQLite serialization."""
         key = mgr.create_key(user_id="alice", name="track")
         assert key.last_used_at is None
 
         mgr.lookup(key.raw_key)
 
-        # Reload from DB to verify last_used_at was updated
+        # Reload from DB to verify last_used_at was NOT updated
         row = mgr._conn.execute(
             "SELECT last_used_at FROM api_keys WHERE key_id = ?",
             (key.key_id,),
         ).fetchone()
-        assert row["last_used_at"] is not None
+        assert row["last_used_at"] is None
 
     def test_lookup_active_true(self, mgr):
         key = mgr.create_key(user_id="alice", name="active")
         found = mgr.lookup(key.raw_key)
         assert found is not None
+        assert found.is_active()
+
+    def test_lookup_legacy_hash_still_works(self, mgr):
+        """Backward-compat: keys stored with old hash formats
+        must still be findable and verifiable."""
+        # Very legacy: plain unsalted SHA-256 (64 hex chars)
+        raw_key_v1 = "kemi_legacy_v1_key_12345"
+        legacy_hash_v1 = hashlib.sha256(raw_key_v1.encode("utf-8")).hexdigest()
+        mgr._conn.execute(
+            "INSERT INTO api_keys (key_id, user_id, hashed_key, name, created_at) VALUES (?, ?, ?, ?, ?)",  # noqa: E501
+            ("kmi_legacy_v1", "alice", legacy_hash_v1, "legacy_v1", datetime.now(timezone.utc).isoformat()),
+        )
+        mgr._conn.commit()
+        found = mgr.lookup(raw_key_v1)
+        assert found is not None
+        assert found.key_id == "kmi_legacy_v1"
+        assert found.is_active()
+
+        # Legacy PBKDF2: fast_hash:salt_hex:pbkdf2_hash
+        raw_key_v2 = "kemi_legacy_v2_key_12345"
+        salt = b"\x00" * 32
+        pbkdf2_hash = hashlib.pbkdf2_hmac("sha256", raw_key_v2.encode("utf-8"), salt, 600000)
+        fast_hash_v2 = hashlib.sha256(raw_key_v2.encode("utf-8")).hexdigest()
+        legacy_hash_v2 = f"{fast_hash_v2}:{salt.hex()}:{pbkdf2_hash.hex()}"
+        mgr._conn.execute(
+            "INSERT INTO api_keys (key_id, user_id, hashed_key, name, created_at) VALUES (?, ?, ?, ?, ?)",  # noqa: E501
+            ("kmi_legacy_v2", "alice", legacy_hash_v2, "legacy_v2", datetime.now(timezone.utc).isoformat()),
+        )
+        mgr._conn.commit()
+        found = mgr.lookup(raw_key_v2)
+        assert found is not None
+        assert found.key_id == "kmi_legacy_v2"
         assert found.is_active()
 
 

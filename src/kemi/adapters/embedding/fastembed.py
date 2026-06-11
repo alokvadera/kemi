@@ -2,6 +2,7 @@ import sys
 from typing import Any
 
 from kemi.adapters.base import EmbeddingAdapter
+from kemi.exceptions import ConfigurationError
 
 
 class FastEmbedAdapter(EmbeddingAdapter):
@@ -35,7 +36,7 @@ class FastEmbedAdapter(EmbeddingAdapter):
 
                 self._model = TextEmbedding(model_name=self._model_name)
             except ImportError as e:
-                raise ImportError("fastembed not installed. Run: pip install kemi[local]") from e
+                raise ConfigurationError("fastembed not installed. Run: pip install kemi[local]") from e  # noqa: E501
         return self._model
 
     def embed(self, texts: list[str]) -> list[list[float]]:

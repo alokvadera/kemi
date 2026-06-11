@@ -1,10 +1,11 @@
-"""Tests for kemi.memory_formation."""
+"""Tests for kemi.memory.formation."""
 
 import pytest
 
 from kemi.adapters.base import EmbeddingAdapter
 from kemi.core import Memory
-from kemi.memory_formation import (
+from kemi.exceptions import ConfigurationError, ValidationError
+from kemi.memory.formation import (
     CandidateMemory,
     LLMMemoryExtractor,
     MemoryType,
@@ -14,8 +15,8 @@ from kemi.memory_formation import (
     extract_memories,
     remember_from_conversation,
 )
-from kemi.models import LifecycleState, MemoryConfig, MemoryObject, MemorySource
-
+from kemi.memory.model import LifecycleState, MemoryConfig, MemoryObject, MemorySource
+from tests._helpers.factories import make_memory
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -153,7 +154,7 @@ def test_openai_extractor_init_without_package(monkeypatch: pytest.MonkeyPatch) 
             del sys.modules[name]
 
     monkeypatch.setitem(sys.modules, "openai", None)  # type: ignore[arg-type]
-    with pytest.raises(ImportError):
+    with pytest.raises(ConfigurationError):
         OpenAIMemoryExtractor()
 
 
@@ -168,7 +169,7 @@ def test_extract_memories_empty_conversation() -> None:
 
 
 def test_extract_memories_no_embed_raises() -> None:
-    with pytest.raises(ValueError, match="embedding adapter is required"):
+    with pytest.raises(ConfigurationError, match="embedding adapter is required"):
         extract_memories(
             [{"role": "user", "content": "hello"}],
             user_id="alice",
@@ -197,7 +198,7 @@ def test_extract_memories_dedup_against_existing() -> None:
     store = _FakeStore()
 
     # Seed an existing memory
-    existing = MemoryObject(
+    existing = make_memory(
         memory_id="existing-1",
         user_id="alice",
         content="sushi very much",
@@ -241,7 +242,7 @@ def test_extract_memories_intra_dedup() -> None:
 # ---------------------------------------------------------------------------
 
 def test_remember_from_conversation_type_guard() -> None:
-    with pytest.raises(TypeError, match="must be a kemi.core.Memory instance"):
+    with pytest.raises(ValidationError, match="must be a kemi.core.Memory instance"):
         remember_from_conversation("not_memory", [], user_id="alice")  # type: ignore[arg-type]
 
 
@@ -310,7 +311,7 @@ def test_extract_memories_skip_existing_duplicate_logs(caplog) -> None:
     embed = _FakeEmbedAdapter()
     store = _FakeStore()
 
-    existing = MemoryObject(
+    existing = make_memory(
         memory_id="existing-1",
         user_id="alice",
         content="sushi very much",
@@ -380,22 +381,23 @@ class TestOpenAIMemoryExtractor:
         return types.SimpleNamespace(OpenAI=lambda **kw: client)
 
     def test_init_import_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that __init__ raises ImportError when openai is missing."""
+        """Test that __init__ raises ConfigurationError when openai is missing."""
         import sys
         monkeypatch.setitem(sys.modules, "openai", None)
-        with pytest.raises(ImportError, match="OpenAIMemoryExtractor requires"):
+        with pytest.raises(ConfigurationError, match="OpenAIMemoryExtractor requires"):
             OpenAIMemoryExtractor()
 
     def test_extract_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test successful extraction via mocked OpenAI API."""
-        import sys, types
+        import sys
+        import types
 
         def mock_create(**kwargs):
             return types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
                         message=types.SimpleNamespace(
-                            content='[{"content": "User likes pizza", "importance": 0.8, "type": "semantic", "tags": ["food"], "metadata": {}}]'
+                            content='[{"content": "User likes pizza", "importance": 0.8, "type": "semantic", "tags": ["food"], "metadata": {}}]'  # noqa: E501
                         )
                     )
                 ]
@@ -415,14 +417,15 @@ class TestOpenAIMemoryExtractor:
 
     def test_extract_with_session_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that session_id is added to metadata."""
-        import sys, types
+        import sys
+        import types
 
         def mock_create(**kwargs):
             return types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
                         message=types.SimpleNamespace(
-                            content='[{"content": "User likes pizza", "importance": 0.8, "type": "semantic", "tags": ["food"], "metadata": {}}]'
+                            content='[{"content": "User likes pizza", "importance": 0.8, "type": "semantic", "tags": ["food"], "metadata": {}}]'  # noqa: E501
                         )
                     )
                 ]
@@ -438,14 +441,15 @@ class TestOpenAIMemoryExtractor:
 
     def test_extract_markdown_code_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test parsing markdown-wrapped JSON response."""
-        import sys, types
+        import sys
+        import types
 
         def mock_create(**kwargs):
             return types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
                         message=types.SimpleNamespace(
-                            content='```json\n[{"content": "User likes pasta", "importance": 0.7, "type": "episodic", "tags": [], "metadata": {}}]\n```'
+                            content='```json\n[{"content": "User likes pasta", "importance": 0.7, "type": "episodic", "tags": [], "metadata": {}}]\n```'  # noqa: E501
                         )
                     )
                 ]
@@ -460,9 +464,9 @@ class TestOpenAIMemoryExtractor:
         assert len(candidates) == 1
         assert candidates[0].content == "User likes pasta"
 
-    def test_extract_api_failure_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test that API failure returns empty list."""
-        import sys, types
+    def test_extract_api_failure_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that API/network failures are re-raised so the caller knows."""
+        import sys
 
         def mock_create(**kwargs):
             raise RuntimeError("API error")
@@ -471,20 +475,20 @@ class TestOpenAIMemoryExtractor:
 
         extractor = OpenAIMemoryExtractor(api_key="test-key")
         conversation = [{"role": "user", "content": "I like pizza."}]
-        candidates = extractor.extract(conversation, user_id="alice")
-
-        assert candidates == []
+        with pytest.raises(RuntimeError, match="API error"):
+            extractor.extract(conversation, user_id="alice")
 
     def test_extract_invalid_items_skipped(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that non-dict items and empty content are skipped."""
-        import sys, types
+        import sys
+        import types
 
         def mock_create(**kwargs):
             return types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
                         message=types.SimpleNamespace(
-                            content='[{"content": "Valid", "importance": 0.5}, 42, {"content": "", "importance": 0.5}, {"content": "Also valid", "importance": 0.6}]'
+                            content='[{"content": "Valid", "importance": 0.5}, 42, {"content": "", "importance": 0.5}, {"content": "Also valid", "importance": 0.6}]'  # noqa: E501
                         )
                     )
                 ]
@@ -503,14 +507,15 @@ class TestOpenAIMemoryExtractor:
 
     def test_extract_episodic_default_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that missing type defaults to EPISODIC and unknown type becomes SEMANTIC."""
-        import sys, types
+        import sys
+        import types
 
         def mock_create(**kwargs):
             return types.SimpleNamespace(
                 choices=[
                     types.SimpleNamespace(
                         message=types.SimpleNamespace(
-                            content='[{"content": "No type field", "importance": 0.8, "tags": [], "metadata": {}}]'
+                            content='[{"content": "No type field", "importance": 0.8, "tags": [], "metadata": {}}]'  # noqa: E501
                         )
                     )
                 ]

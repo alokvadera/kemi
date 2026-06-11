@@ -3,12 +3,12 @@
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
-from kemi.webhooks import (
+from kemi.exceptions import ValidationError
+from kemi.infra.webhooks import (
     RetryConfig,
     WebhookConfig,
     WebhookDispatcher,
@@ -16,8 +16,8 @@ from kemi.webhooks import (
     WebhookStore,
     build_payload,
     sign_payload,
+    validate_webhook_url,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -48,6 +48,100 @@ def sample_config() -> WebhookConfig:
         secret="test-secret",
         active=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# SSRF URL validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateWebhookUrl:
+    def test_valid_http_url(self) -> None:
+        validate_webhook_url("http://example.com/hook")
+
+    def test_valid_https_url(self) -> None:
+        validate_webhook_url("https://example.com/hook")
+
+    def test_valid_https_with_port(self) -> None:
+        validate_webhook_url("https://example.com:8443/hook")
+
+    def test_rejects_ftp_scheme(self) -> None:
+        with pytest.raises(ValidationError, match="scheme must be http or https"):
+            validate_webhook_url("ftp://example.com/hook")
+
+    def test_rejects_file_scheme(self) -> None:
+        with pytest.raises(ValidationError, match="scheme must be http or https"):
+            validate_webhook_url("file:///etc/passwd")
+
+    def test_rejects_javascript_scheme(self) -> None:
+        with pytest.raises(ValidationError, match="scheme must be http or https"):
+            validate_webhook_url("javascript:alert(1)")
+
+    def test_rejects_localhost(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://localhost/hook")
+
+    def test_rejects_localhost_case_insensitive(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://LOCALHOST/hook")
+
+    def test_rejects_127_0_0_1(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://127.0.0.1/hook")
+
+    def test_rejects_0_0_0_0(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://0.0.0.0/hook")
+
+    def test_rejects_loopback_ipv6(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://[::1]/hook")
+
+    def test_rejects_private_10_x(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://10.0.0.1/hook")
+
+    def test_rejects_private_192_168_x(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://192.168.1.1/hook")
+
+    def test_rejects_private_172_16_x(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://172.16.0.1/hook")
+
+    def test_rejects_link_local_169_254(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://169.254.1.1/hook")
+
+    def test_rejects_link_local_ipv6(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://[fe80::1]/hook")
+
+    def test_rejects_unspecified_ipv4(self) -> None:
+        with pytest.raises(ValidationError, match="localhost"):
+            validate_webhook_url("http://0.0.0.0/hook")
+
+    def test_rejects_unspecified_ipv6(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://[::]/hook")
+
+    def test_rejects_multicast(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://224.0.0.1/hook")
+
+    def test_rejects_missing_hostname(self) -> None:
+        with pytest.raises(ValidationError, match="valid hostname"):
+            validate_webhook_url("http:///hook")
+
+    def test_rejects_reserved_ipv4(self) -> None:
+        with pytest.raises(ValidationError, match="private or reserved"):
+            validate_webhook_url("http://240.0.0.1/hook")
+
+    def test_public_ip_allowed(self) -> None:
+        validate_webhook_url("http://8.8.8.8/hook")
+
+    def test_public_ipv6_allowed(self) -> None:
+        validate_webhook_url("http://[2001:4860:4860::8888]/hook")
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +303,7 @@ class TestWebhookStore:
         assert retrieved.active is True
 
     def test_create_auto_assigns_id(self, store: WebhookStore) -> None:
-        cfg = WebhookConfig(webhook_id="", url="http://example.com/hook", events=[WebhookEventType.REMEMBERED])
+        cfg = WebhookConfig(webhook_id="", url="http://example.com/hook", events=[WebhookEventType.REMEMBERED])  # noqa: E501
         wh_id = store.create(cfg)
         assert wh_id
         assert wh_id != ""
@@ -283,7 +377,7 @@ class TestWebhookStore:
         cfg = WebhookConfig(
             webhook_id="",
             url="http://example.com/hook",
-            events=[WebhookEventType.REMEMBERED, WebhookEventType.CONFLICT, WebhookEventType.CONSOLIDATED],
+            events=[WebhookEventType.REMEMBERED, WebhookEventType.CONFLICT, WebhookEventType.CONSOLIDATED],  # noqa: E501
             secret="s3cr3t",
             active=True,
             retry_config=RetryConfig(max_retries=3, base_delay_seconds=0.5),
@@ -291,7 +385,7 @@ class TestWebhookStore:
         wh_id = store.create(cfg)
         retrieved = store.get(wh_id)
         assert retrieved is not None
-        assert retrieved.events == [WebhookEventType.REMEMBERED, WebhookEventType.CONFLICT, WebhookEventType.CONSOLIDATED]
+        assert retrieved.events == [WebhookEventType.REMEMBERED, WebhookEventType.CONFLICT, WebhookEventType.CONSOLIDATED]  # noqa: E501
         assert retrieved.secret == "s3cr3t"
         assert retrieved.retry_config.max_retries == 3
         assert retrieved.retry_config.base_delay_seconds == 0.5
@@ -312,7 +406,7 @@ class TestWebhookDispatcher:
         """Register a webhook that listens to REMEMBERED events."""
         cfg = WebhookConfig(
             webhook_id="",
-            url="http://localhost:1/dummy",  # Will be overridden by patch
+            url="http://example.com:1/dummy",  # Will be overridden by patch
             events=[WebhookEventType.REMEMBERED],
             secret="test-secret",
             active=True,
@@ -338,7 +432,7 @@ class TestWebhookDispatcher:
         # Create a subscriber pointing to an endpoint we control
         cfg = WebhookConfig(
             webhook_id="",
-            url="http://localhost:1/test",  # Will fail, so patch httpx
+            url="http://example.com:1/test",  # Will fail, so patch httpx
             events=[WebhookEventType.REMEMBERED],
             secret="test",
             active=True,
@@ -373,6 +467,52 @@ class TestWebhookDispatcher:
         assert "X-Kemi-Signature" in headers
         assert headers["X-Kemi-Signature"] != ""
 
+    def test_dispatch_sync_signature_matches_body(
+        self, store: WebhookStore, store_and_dispatcher: tuple[WebhookStore, WebhookDispatcher]
+    ) -> None:
+        """The X-Kemi-Signature header must match the HMAC of the exact bytes sent."""
+        _, dispatcher = store_and_dispatcher
+        cfg = WebhookConfig(
+            webhook_id="",
+            url="http://example.com:1/sign-test",
+            events=[WebhookEventType.REMEMBERED],
+            secret="sign-secret",
+            active=True,
+            retry_config=RetryConfig(max_retries=1, base_delay_seconds=0.01),
+        )
+        store.create(cfg)
+
+        from httpx import Response
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__enter__.return_value
+            mock_client.post.return_value = Response(200, text="OK")
+
+            payload = build_payload(
+                event=WebhookEventType.REMEMBERED,
+                memory_id="mem-1",
+                user_id="user1",
+                snapshot={"content": "hello"},
+            )
+            dispatcher.dispatch_sync(payload, WebhookEventType.REMEMBERED)
+
+        call_args = mock_client.post.call_args
+        assert call_args is not None
+        sent_body = call_args[1]["content"]
+        headers = call_args[1]["headers"]
+        sent_sig = headers["X-Kemi-Signature"]
+
+        expected_body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        assert sent_body == expected_body
+
+        import hashlib
+        import hmac
+
+        expected_sig = hmac.new(
+            b"sign-secret", expected_body.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        assert sent_sig == expected_sig
+
     def test_dispatch_sync_retry_on_failure(
         self, store: WebhookStore, store_and_dispatcher: tuple[WebhookStore, WebhookDispatcher]
     ) -> None:
@@ -380,13 +520,13 @@ class TestWebhookDispatcher:
         _, dispatcher = store_and_dispatcher
         cfg = WebhookConfig(
             webhook_id="",
-            url="http://localhost:1/fail",
+            url="http://example.com:1/fail",
             events=[WebhookEventType.REMEMBERED],
             secret="test",
             active=True,
             retry_config=RetryConfig(max_retries=2, base_delay_seconds=0.01),
         )
-        wh_id = store.create(cfg)
+        store.create(cfg)
 
         from httpx import Response
 
@@ -417,13 +557,13 @@ class TestWebhookDispatcher:
         _, dispatcher = store_and_dispatcher
         cfg = WebhookConfig(
             webhook_id="",
-            url="http://localhost:1/async-test",
+            url="http://example.com:1/async-test",
             events=[WebhookEventType.UPDATED],
             secret="async-secret",
             active=True,
             retry_config=RetryConfig(max_retries=1, base_delay_seconds=0.01),
         )
-        wh_id = store.create(cfg)
+        store.create(cfg)
 
         from httpx import Response
 
@@ -460,6 +600,53 @@ class TestWebhookDispatcher:
         assert results == []
 
     @pytest.mark.asyncio
+    async def test_dispatch_async_signature_matches_body(
+        self, store: WebhookStore, store_and_dispatcher: tuple[WebhookStore, WebhookDispatcher]
+    ) -> None:
+        """The X-Kemi-Signature header must match the HMAC of the exact bytes sent (async)."""
+        _, dispatcher = store_and_dispatcher
+        cfg = WebhookConfig(
+            webhook_id="",
+            url="http://example.com:1/async-sign-test",
+            events=[WebhookEventType.UPDATED],
+            secret="async-sign-secret",
+            active=True,
+            retry_config=RetryConfig(max_retries=1, base_delay_seconds=0.01),
+        )
+        store.create(cfg)
+
+        from httpx import Response
+
+        with patch("httpx.AsyncClient") as mock_client_cls:
+            mock_client = mock_client_cls.return_value.__aenter__.return_value
+            mock_client.post.return_value = Response(200, text="OK")
+
+            payload = build_payload(
+                event=WebhookEventType.UPDATED,
+                memory_id="mem-2",
+                user_id="user2",
+                snapshot={"content": "world"},
+            )
+            await dispatcher.dispatch_async(payload, WebhookEventType.UPDATED)
+
+        call_args = mock_client.post.call_args
+        assert call_args is not None
+        sent_body = call_args[1]["content"]
+        headers = call_args[1]["headers"]
+        sent_sig = headers["X-Kemi-Signature"]
+
+        expected_body = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        assert sent_body == expected_body
+
+        import hashlib
+        import hmac
+
+        expected_sig = hmac.new(
+            b"async-sign-secret", expected_body.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        assert sent_sig == expected_sig
+
+    @pytest.mark.asyncio
     async def test_dispatch_async_retry(
         self, store: WebhookStore, store_and_dispatcher: tuple[WebhookStore, WebhookDispatcher]
     ) -> None:
@@ -467,7 +654,7 @@ class TestWebhookDispatcher:
         _, dispatcher = store_and_dispatcher
         cfg = WebhookConfig(
             webhook_id="",
-            url="http://localhost:1/retry-test",
+            url="http://example.com:1/retry-test",
             events=[WebhookEventType.DELETED],
             secret="test",
             active=True,

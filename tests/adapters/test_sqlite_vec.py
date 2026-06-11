@@ -2,8 +2,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter, _SQLITE_VEC_AVAILABLE
-from kemi.models import LifecycleState, MemoryObject, MemorySource
+from kemi.adapters.storage.sqlite_vec import SQLiteVecStorageAdapter
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
@@ -117,7 +119,7 @@ def test_search_fallback_empty_embedding(vec_adapter) -> None:
         embedding_dim=64,
     )
     vec_adapter.store(mem)
-    results = vec_adapter.search("user1", [], top_k=10)
+    vec_adapter.search("user1", [], top_k=10)
     # Empty embedding triggers fallback; parent search won't match because
     # cosine_similarity with empty list may not work. This test mainly
     # verifies it doesn't crash.

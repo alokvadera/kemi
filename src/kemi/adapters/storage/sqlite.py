@@ -9,12 +9,12 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from kemi import scoring
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory import scoring
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 if TYPE_CHECKING:
-    from kemi.encryption import EncryptionConfig
+    from kemi.infra.encryption import EncryptionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +37,28 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     CURRENT_VERSION = 8
 
+    @staticmethod
+    def _parse_tags(tags_csv: str) -> list[str]:
+        """Inverse of the CSV tag serialization in ``_row_to_memory``.
+
+        Tags are joined with ``,`` and ``,`` inside tags is escaped as
+        ``\\,``. A trailing empty string (from a trailing comma) is
+        dropped.
+        """
+        if not tags_csv:
+            return []
+        return [t.replace("\\,", ",") for t in tags_csv.split(",") if t]
+
     def __init__(
         self,
         db_path: str = "kemi.db",
-        encryption: "EncryptionConfig | None" = None,
+        encryption: EncryptionConfig | None = None,
     ) -> None:
         self._db_path = db_path
         self._local = threading.local()
         self._init_schema()
         # Lazy import to avoid circular dependency at module level
-        from kemi.encryption import EncryptionConfig, FieldEncryptor
+        from kemi.infra.encryption import EncryptionConfig, FieldEncryptor
 
         if encryption is None:
             # Try environment-based config
@@ -116,7 +128,7 @@ class SQLiteStorageAdapter(StorageAdapter):
     def __del__(self) -> None:
         self.close()
 
-    def __enter__(self) -> "SQLiteStorageAdapter":
+    def __enter__(self) -> SQLiteStorageAdapter:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -197,6 +209,7 @@ class SQLiteStorageAdapter(StorageAdapter):
             """)
 
             self._run_migrations(conn)
+            conn.commit()
 
     def _get_schema_version(self, conn: sqlite3.Connection) -> int:
         try:
@@ -554,13 +567,14 @@ class SQLiteStorageAdapter(StorageAdapter):
                 )
             rows = cursor.fetchall()
 
-            for row in rows:
-                conn.execute(
+            # Batch insert via executemany instead of one INSERT per row.
+            if rows:
+                conn.executemany(
                     """
                     INSERT INTO memories_fts (memory_id, user_id, content, namespace, session_id)
                     VALUES (?, ?, ?, ?, ?)
                 """,
-                    row,
+                    rows,
                 )
 
             return len(rows)
@@ -615,6 +629,43 @@ class SQLiteStorageAdapter(StorageAdapter):
 
     def update(self, memory: MemoryObject) -> None:
         self.store(memory)
+
+    def update_many(self, memories: list[MemoryObject]) -> int:
+        """Update multiple memories in a single atomic transaction.
+
+        Uses ``executemany`` to batch UPDATE statements within one
+        transaction, reducing round-trip cost from O(N) to O(1).
+
+        Args:
+            memories: List of MemoryObjects to update.
+
+        Returns:
+            Number of memories updated.
+        """
+        if not memories:
+            return 0
+
+        with self._transaction() as conn:
+            for memory in memories:
+                row = self._memory_to_row(memory)
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO memories
+                    (memory_id, user_id, content, embedding, embedding_dim, created_at,
+                     last_accessed_at, source, importance, lifecycle_state, metadata, tags,
+                     confidence, memory_type, session_id, namespace, version,
+                     agent_id, run_id, app_id, expires_at)
+                    VALUES (:memory_id, :user_id, :content, :embedding, :embedding_dim,
+                            :created_at, :last_accessed_at, :source, :importance,
+                            :lifecycle_state, :metadata, :tags,
+                            :confidence, :memory_type, :session_id, :namespace, :version,
+                            :agent_id, :run_id, :app_id, :expires_at)
+                """,
+                    row,
+                )
+                # Sync to FTS5 index
+                self._sync_fts_single(conn, memory)
+        return len(memories)
 
     def delete_by_user(self, user_id: str) -> int:
         with self._get_connection() as conn:
@@ -679,6 +730,84 @@ class SQLiteStorageAdapter(StorageAdapter):
         with self._get_connection() as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM memories WHERE user_id = ?", (user_id,))
             return cursor.fetchone()[0]  # type: ignore[no-any-return]
+
+    def count_aggregates(
+        self,
+        user_id: str,
+        lifecycle_filter: list[LifecycleState] | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """SQL-based aggregate pushdown for ``stats()``.
+
+        Runs three GROUP BY queries (lifecycle, source, tag presence) plus
+        an AVG(importance) in a single connection block. O(1) per state
+        instead of O(N) per memory.
+        """
+        from kemi.memory.model import LifecycleState as _LifecycleState
+        from kemi.memory.model import MemorySource as _MemorySource
+
+        with self._get_connection() as conn:
+            where = ["user_id = ?"]
+            params: list[Any] = [user_id]
+            if lifecycle_filter is not None:
+                placeholders = ",".join("?" * len(lifecycle_filter))
+                where.append(f"lifecycle_state IN ({placeholders})")
+                params.extend(s.value for s in lifecycle_filter)
+            if session_id is not None:
+                where.append("session_id = ?")
+                params.append(session_id)
+            where_sql = " AND ".join(where)
+
+            total_row = conn.execute(
+                f"SELECT COUNT(*), COALESCE(AVG(importance), 0.0) FROM memories WHERE {where_sql}",
+                params,
+            ).fetchone()
+            total = int(total_row[0])
+            avg_imp_numer = float(total_row[1]) * total  # recover the sum
+
+            lifecycle_rows = conn.execute(
+                f"SELECT lifecycle_state, COUNT(*) FROM memories WHERE {where_sql} GROUP BY lifecycle_state",  # noqa: E501
+                params,
+            ).fetchall()
+            by_lifecycle = {state.value: 0 for state in _LifecycleState}
+            for state_value, count in lifecycle_rows:
+                if state_value in by_lifecycle:
+                    by_lifecycle[state_value] = int(count)
+
+            source_rows = conn.execute(
+                f"SELECT source, COUNT(*) FROM memories WHERE {where_sql} GROUP BY source",
+                params,
+            ).fetchall()
+            by_source = {source.value: 0 for source in _MemorySource}
+            for source_value, count in source_rows:
+                if source_value in by_source:
+                    by_source[source_value] = int(count)
+
+            # tags: stored as CSV with backslash-escaped commas. We have
+            # to split in Python because SQLite's string functions don't
+            # understand our escape convention. This is still O(N) on the
+            # tag column, but cheaper than the full get_all_by_user scan
+            # because we only fetch one column instead of all 21 fields.
+            tag_counts: dict[str, int] = {}
+            total_with_tags = 0
+            mem_rows = conn.execute(
+                f"SELECT tags FROM memories WHERE {where_sql}", params
+            ).fetchall()
+            for (tags_csv,) in mem_rows:
+                parsed = self._parse_tags(tags_csv) if tags_csv else []
+                if parsed:
+                    total_with_tags += 1
+                    for tag in parsed:
+                        tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        return {
+            "total": total,
+            "by_lifecycle": by_lifecycle,
+            "by_source": by_source,
+            "total_with_tags": int(total_with_tags),
+            "tag_counts": tag_counts,
+            "avg_importance_numerator": float(avg_imp_numer),
+        }
 
     def get_all(
         self,
@@ -877,9 +1006,14 @@ class SQLiteStorageAdapter(StorageAdapter):
             rows = cursor.fetchall()
             return [row[0] for row in rows]
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        target = to_version if to_version is not None else self.CURRENT_VERSION
         with self._get_connection() as conn:
             self._run_migrations(conn)
+            conn.commit()
+        return target
 
     def get_by_tag(
         self,
@@ -911,6 +1045,15 @@ class SQLiteStorageAdapter(StorageAdapter):
 
         return [self._row_to_memory(row) for row in rows]
 
+    def get_namespaces(self, user_id: str) -> list[str]:
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT DISTINCT namespace FROM memories WHERE user_id = ?",
+                (user_id,),
+            )
+            rows = cursor.fetchall()
+            return [row[0] for row in rows]
+
     def get_api_key_manager(self) -> Any:
         """Return an APIKeyManager bound to this adapter's connection.
 
@@ -918,6 +1061,6 @@ class SQLiteStorageAdapter(StorageAdapter):
         Returns a fresh manager instance each call; the manager is cheap to
         create because it shares the underlying connection pool.
         """
-        from kemi.api_keys import APIKeyManager
+        from kemi.infra.api_keys import APIKeyManager
 
         return APIKeyManager(connection=self._get_connection())

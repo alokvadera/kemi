@@ -21,7 +21,8 @@ from datetime import datetime
 from typing import Any
 
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.exceptions import ConfigurationError
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +30,10 @@ try:
     import chromadb
     from chromadb.api.types import EmbeddingFunction, Embeddings
 
-    _CHROMA_AVAILABLE = True
+    _chroma_available = True
 except ImportError:  # pragma: no cover
-    chromadb = None  # type: ignore[assignment]
-    _CHROMA_AVAILABLE = False
+    chromadb = None
+    _chroma_available = False
 
 _CHROMA_ERR = (
     "chromadb>=0.4.0 is required for ChromaStorageAdapter. "
@@ -40,7 +41,7 @@ _CHROMA_ERR = (
 )
 
 
-if _CHROMA_AVAILABLE:
+if _chroma_available:
     class _NoOpEmbeddingFunction(EmbeddingFunction):
         """No-op embedding function — we always pass embeddings ourselves."""
 
@@ -70,8 +71,8 @@ class ChromaStorageAdapter(StorageAdapter):
         path: str | None = None,
         collection_name: str = "kemi",
     ) -> None:
-        if not _CHROMA_AVAILABLE:
-            raise ImportError(_CHROMA_ERR)
+        if not _chroma_available:
+            raise ConfigurationError(_CHROMA_ERR)
 
         self._collection_name = collection_name
         chroma_path = path or os.environ.get(
@@ -667,9 +668,14 @@ class ChromaStorageAdapter(StorageAdapter):
 
     # ── Schema ──────────────────────────────────────────────────────────
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        from_v = from_version if from_version is not None else 1
+        to_v = to_version if to_version is not None else 1
         logger.info(
             "Chroma schema upgrade from v%d to v%d is a no-op (schema managed by Chroma)",
-            from_version,
-            to_version,
+            from_v,
+            to_v,
         )
+        return to_v

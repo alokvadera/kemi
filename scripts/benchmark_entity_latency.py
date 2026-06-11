@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from kemi import Memory, MemoryConfig
 from kemi.adapters.base import EmbeddingAdapter
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemoryType
+from kemi.memory.model import LifecycleState, MemoryObject, MemoryType
 
 # ── Configuration ───────────────────────────────────────────────────
 DIM = 64
@@ -118,13 +118,13 @@ def _make_memory_content(rng: random.Random, entities: list[str]) -> str:
 def _seed_memories(mem: Memory, user_id: str, count: int) -> list[str]:
     """Populate store with *count* memories. Returns list of memory IDs."""
     mids: list[str] = []
-    for i in range(count):
+    for _i in range(count):
         n_entities = RNG.randint(0, 3)
         entities = _pick_entity_subset(RNG, n_entities)
         content = _make_memory_content(RNG, entities)
         emb = mem._embed.embed_single(content)
         mo = MemoryObject(
-            memory_id=f"bench-{user_id}-{i:05d}",
+            memory_id=f"bench-{user_id}-{_i:05d}",
             user_id=user_id,
             content=content,
             embedding=emb,
@@ -141,7 +141,7 @@ def _make_queries(count: int) -> list[str]:
     """Create diverse queries that target entity subsets."""
     queries: list[str] = []
     pool = NAMES + PLACES + DATES + ORGANIZATIONS
-    for i in range(count):
+    for _i in range(count):
         n = RNG.randint(1, 2)
         entities = RNG.sample(pool, n)
         queries.append(f"Tell me about {' and '.join(entities)}.")
@@ -249,7 +249,7 @@ def main() -> int:
         p99_idx = min(int(n * 0.99), n - 1)
         return {
             "mean_ms": statistics.mean(data),
-            "stddev_ms": statistics.stdev(data) if n >= 2 else 0.0,
+            "stddev_ms": statistics.pstdev(data) if n >= 1 else 0.0,
             "median_ms": statistics.median(data),
             "min_ms": min(data),
             "max_ms": max(data),
@@ -274,6 +274,7 @@ def main() -> int:
         )
 
     _row("Mean", stats_off["mean_ms"], stats_uncached["mean_ms"], stats_cached["mean_ms"])
+    _row("Stddev", stats_off["stddev_ms"], stats_uncached["stddev_ms"], stats_cached["stddev_ms"])
     _row("Median", stats_off["median_ms"], stats_uncached["median_ms"], stats_cached["median_ms"])
     _row("Min", stats_off["min_ms"], stats_uncached["min_ms"], stats_cached["min_ms"])
     _row("Max", stats_off["max_ms"], stats_uncached["max_ms"], stats_cached["max_ms"])
@@ -340,26 +341,27 @@ def main() -> int:
         x = np.arange(len(labels))
         width = 0.5
 
-        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(8, 14))
+        _fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(12, 12))
 
-        # Top subplot: mean latency bar chart
-        ax1 = axes[0]
-        bars = ax1.bar(x, means, width, color=colors, alpha=0.85)
+        # Top-left subplot: mean latency bar chart
+        ax1 = axes[0, 0]
+        stddevs = [stats_off["stddev_ms"], stats_uncached["stddev_ms"], stats_cached["stddev_ms"]]
+        bars = ax1.bar(x, means, width, color=colors, alpha=0.85, yerr=stddevs, capsize=6, error_kw={"linewidth": 1.5, "ecolor": "#2c3e50"})
         ax1.set_ylabel("Mean Latency (ms)")
         ax1.set_title("Recall Latency: Cached Entities vs On-the-fly Extraction")
         ax1.set_xticks(x)
         ax1.set_xticklabels(labels)
         ax1.grid(axis="y", alpha=0.3)
 
-        for bar in bars:
+        for bar, std in zip(bars, stddevs):
             height = bar.get_height()
             ax1.text(
-                bar.get_x() + bar.get_width() / 2, height + 0.05,
+                bar.get_x() + bar.get_width() / 2, height + std + 0.05,
                 f"{height:.2f}ms", ha="center", va="bottom", fontsize=10,
             )
 
-        # Middle subplot: per-query latency distribution (box plot)
-        ax2 = axes[1]
+        # Top-right subplot: per-query latency distribution (box plot)
+        ax2 = axes[0, 1]
         box_data = [latencies_off, latencies_uncached, latencies_cached]
         box_labels = labels
 
@@ -392,8 +394,27 @@ def main() -> int:
         ]
         ax2.legend(handles=legend_elements, loc="upper right")
 
-        # Bottom subplot: latency CDF
-        ax3 = axes[2]
+        # Bottom-left subplot: latency density (violin plot)
+        ax3 = axes[1, 0]
+        violin_data = [latencies_off, latencies_uncached, latencies_cached]
+        vp = ax3.violinplot(violin_data, positions=x, widths=0.5, showmeans=True, showmedians=True)
+        for body, color in zip(vp["bodies"], colors):
+            body.set_facecolor(color)
+            body.set_alpha(0.6)
+        for partname in ("cbars", "cmins", "cmaxes", "cmedians"):
+            vp[partname].set_edgecolor("black")
+            vp[partname].set_linewidth(1.2)
+        vp["cmeans"].set_edgecolor("#f39c12")
+        vp["cmeans"].set_linewidth(2)
+
+        ax3.set_xticks(x)
+        ax3.set_xticklabels(labels)
+        ax3.set_title("Latency Density Shape (Violin)")
+        ax3.set_ylabel("Latency (ms)")
+        ax3.grid(axis="y", alpha=0.3)
+
+        # Bottom-right subplot: latency CDF
+        ax4 = axes[1, 1]
         line_styles = ["-", "--", "-."]
         for latencies, color, label, ls in zip(
             [latencies_off, latencies_uncached, latencies_cached],
@@ -403,20 +424,20 @@ def main() -> int:
         ):
             sorted_lat = np.sort(latencies)
             cum_prob = np.arange(1, len(sorted_lat) + 1) / len(sorted_lat)
-            ax3.plot(sorted_lat, cum_prob, color=color, linestyle=ls, linewidth=2, label=label)
+            ax4.plot(sorted_lat, cum_prob, color=color, linestyle=ls, linewidth=2, label=label)
 
-        ax3.set_title("Latency CDF (Tail Behavior)")
-        ax3.set_xlabel("Latency (ms, log scale)")
-        ax3.set_ylabel("Cumulative Probability")
-        ax3.set_xscale("log")
-        ax3.grid(alpha=0.3, which="both")
-        ax3.legend(loc="lower right")
+        ax4.set_title("Latency CDF (Tail Behavior)")
+        ax4.set_xlabel("Latency (ms, log scale)")
+        ax4.set_ylabel("Cumulative Probability")
+        ax4.set_xscale("log")
+        ax4.grid(alpha=0.3, which="both")
+        ax4.legend(loc="lower right")
 
         # Horizontal reference lines at p50, p95, p99
         for p in [0.50, 0.95, 0.99]:
-            ax3.axhline(y=p, color="#bdc3c7", linestyle=":", linewidth=1)
-            ax3.text(
-                ax3.get_xlim()[1] * 0.98, p - 0.02,
+            ax4.axhline(y=p, color="#bdc3c7", linestyle=":", linewidth=1)
+            ax4.text(
+                ax4.get_xlim()[1] * 0.98, p - 0.02,
                 f"p{int(p*100)}", ha="right", va="top",
                 fontsize=8, color="#7f8c8d",
             )

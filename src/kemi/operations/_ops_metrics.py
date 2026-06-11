@@ -7,19 +7,19 @@ from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from kemi._memory_impl import Memory
+    from kemi.memory.service import MemoryService
 
 logger = logging.getLogger(__name__)
 
 
-def latency_tracker(memory: "Memory", operation: str) -> Any:
+def latency_tracker(memory: MemoryService, operation: str) -> Any:
     """Return a context manager that tracks operation latency if metrics are enabled."""
     if memory._metrics is not None:
         return memory._metrics.track(operation)
     return nullcontext()
 
 
-def track_operation(memory: "Memory", operation: str, **details: Any) -> None:
+def track_operation(memory: MemoryService, operation: str, **details: Any) -> None:
     """Record a single operation in the metrics collector (no-op if disabled)."""
     if memory._metrics is None:
         return
@@ -33,7 +33,7 @@ def track_operation(memory: "Memory", operation: str, **details: Any) -> None:
 
 
 def track_operation_full(
-    memory: "Memory",
+    memory: MemoryService,
     operation: str,
     user_id: str,
     details: dict[str, Any] | None,
@@ -46,7 +46,7 @@ def track_operation_full(
 
     If *audit_batch* is provided, the audit entry is appended to that list
     instead of being written immediately. The caller is responsible for
-    passing the list to ``AuditTrail.log_operation_batch``.
+    passing the list to each audit sink's :meth:`log_batch` method.
     """
     if memory._metrics is not None:
         counter_name = f"{operation}_total"
@@ -68,9 +68,9 @@ def track_operation_full(
             }
         )
         return
-    if memory._audit_trail is not None:
+    for sink in memory._plugins.audit_sinks:
         try:
-            memory._audit_trail.log_operation(
+            sink.log(
                 user_id=user_id,
                 operation=operation,
                 details=details or {},
@@ -78,13 +78,13 @@ def track_operation_full(
                 namespace=namespace,
                 status=status,
             )
-        except (AttributeError, TypeError, ValueError):
-            # Broad catch: audit log can fail for many reasons (DB locked,
-            # schema mismatch, IO error). Audit must never break the caller.
+        except Exception:
+            # Broad catch: audit sinks are user code (built-in or custom);
+            # they must never break the calling operation.
             logger.warning(f"Audit log failed for {operation}", exc_info=True)
 
 
-def record_embed_error(memory: "Memory") -> None:
+def record_embed_error(memory: MemoryService) -> None:
     """Increment the embed error counter (no-op if metrics disabled)."""
     if memory._metrics is not None and hasattr(memory._metrics, "embed_errors_total"):
         try:
@@ -93,7 +93,7 @@ def record_embed_error(memory: "Memory") -> None:
             pass
 
 
-def record_store_error(memory: "Memory") -> None:
+def record_store_error(memory: MemoryService) -> None:
     """Increment the store error counter (no-op if metrics disabled)."""
     if memory._metrics is not None and hasattr(memory._metrics, "store_errors_total"):
         try:
@@ -102,7 +102,7 @@ def record_store_error(memory: "Memory") -> None:
             pass
 
 
-def get_metrics(memory: "Memory") -> dict[str, Any] | None:
+def get_metrics(memory: MemoryService) -> dict[str, Any] | None:
     """Return current metrics snapshot as a dict, or None if disabled."""
     if memory._metrics is None:
         return None
@@ -116,7 +116,7 @@ def get_metrics(memory: "Memory") -> dict[str, Any] | None:
     return None
 
 
-def get_metrics_prometheus(memory: "Memory") -> str | None:
+def get_metrics_prometheus(memory: MemoryService) -> str | None:
     """Return metrics in Prometheus text format, or None if disabled."""
     if memory._metrics is None:
         return None
@@ -128,13 +128,13 @@ def get_metrics_prometheus(memory: "Memory") -> str | None:
     return None
 
 
-def enable_adaptive_retrieval(memory: "Memory", enable: bool = True) -> None:
+def enable_adaptive_retrieval(memory: MemoryService, enable: bool = True) -> None:
     """Enable or disable adaptive retrieval (re-weights hybrid scores per user)."""
     if not enable:
         memory._adaptive_retriever = None
         return
     try:
-        from kemi.adaptive import AdaptiveRetriever
+        from kemi.memory.adaptive import AdaptiveRetriever
 
         memory._adaptive_retriever = AdaptiveRetriever()
         logger.info("Adaptive retrieval enabled")
@@ -143,31 +143,58 @@ def enable_adaptive_retrieval(memory: "Memory", enable: bool = True) -> None:
 
 
 def enable_audit_trail(
-    memory: "Memory",
+    memory: MemoryService,
     retention_days: int = 365,
     auto_purge: bool = True,
 ) -> None:
-    """Enable the audit trail for compliance logging."""
-    try:
-        from kemi.audit import AuditTrail
+    """Enable the audit trail for compliance logging.
 
-        conn = memory._store._get_connection()  # type: ignore[attr-defined]
-        memory._audit_trail = AuditTrail(
+    Creates an :class:`kemi.infra.audit.AuditTrail`, wraps it in an
+    :class:`kemi.plugins.AuditTrailSink`, and appends the sink to the
+    plugin registry. The legacy ``memory._audit_trail`` is also
+    populated for backward compatibility.
+
+    The audit trail requires a SQLite-compatible storage adapter (it
+    shares the connection). On non-SQLite backends the trail is skipped
+    with a warning rather than raising.
+    """
+    if not hasattr(memory._store, "_get_connection"):
+        logger.warning(
+            "Audit trail is SQLite-only (storage adapter %s does not "
+            "expose _get_connection); skipping enable_audit_trail().",
+            type(memory._store).__name__,
+        )
+        return
+    try:
+        from kemi.infra.audit import AuditTrail
+        from kemi.plugins import AuditTrailSink
+
+        conn = memory._store._get_connection()
+        audit = AuditTrail(
             db_connection=conn,
             retention_days=retention_days,
             auto_purge=auto_purge,
         )
+        memory._audit_trail = audit
+        memory._plugins.audit_sinks.append(AuditTrailSink(audit))
     except (ImportError, AttributeError) as e:
         logger.warning(f"Audit trail not available: {e}")
 
 
-def enable_query_cache(memory: "Memory", max_size: int = 128) -> None:
-    """Enable an LRU cache for ``recall()`` results."""
-    from kemi.operations._query_cache import _QueryCache
+def enable_query_cache(memory: MemoryService, max_size: int = 128) -> None:
+    """Enable an LRU cache for ``recall()`` results.
 
-    memory._query_cache = _QueryCache(max_size=max_size)
+    Creates a :class:`kemi.plugins.LruQueryCache` and installs it on the
+    plugin registry. The legacy ``memory._query_cache`` is also set.
+    """
+    from kemi.plugins import LruQueryCache
+
+    cache = LruQueryCache(max_size=max_size)
+    memory._query_cache = cache
+    memory._plugins.query_cache = cache
 
 
-def disable_query_cache(memory: "Memory") -> None:
+def disable_query_cache(memory: MemoryService) -> None:
     """Disable the query cache."""
     memory._query_cache = None
+    memory._plugins.query_cache = None

@@ -20,13 +20,14 @@ import random
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from kemi import Memory
 from kemi.adapters.embedding.custom import CustomEmbedAdapter
 from kemi.adapters.storage.sqlite import SQLiteStorageAdapter
-from kemi.models import MemoryObject, MemorySource, MemoryType
+from kemi.memory.model import MemoryObject, MemorySource, MemoryType
 
 # ── Configuration ───────────────────────────────────────────────────
 DIM = 64
@@ -70,10 +71,10 @@ def _seed_memories(mem: Memory, user_id: str, count: int) -> None:
     """Populate the store with *count* random memories."""
     embed = mem._embed
     store = mem._store
-    for i in range(count):
+    for _i in range(count):
         emb = embed.embed_single(f"seed {i}")
         mo = MemoryObject(
-            memory_id=f"bench-{user_id}-{i}",
+            memory_id=f"bench-{user_id}-{_i}",
             user_id=user_id,
             content=f"This is benchmark memory number {i} with some filler text to make it realistic.",
             embedding=emb,
@@ -154,7 +155,7 @@ async def main() -> None:
     print(f"  Dim: {DIM}  |  Top-K: {TOP_K}  |  Queries/scale: {QUERIES_PER_SCALE}")
     print()
 
-    results: dict[str, list] = {
+    results: dict[str, list[Any]] = {
         "batch_total_ms": [],
         "stream_total_ms": [],
         "stream_ttf_ms": [],
@@ -252,7 +253,7 @@ async def main() -> None:
         x = np.arange(len(scales_str))
         width = 0.3
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
 
         # Left: total time bars
         ax1.bar(x - width / 2, results["batch_total_ms"], width,

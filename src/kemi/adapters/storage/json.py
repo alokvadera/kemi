@@ -5,12 +5,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kemi import scoring
 from kemi.adapters.base import StorageAdapter
-from kemi.models import LifecycleState, MemoryObject, MemorySource, MemoryType
+from kemi.memory import scoring
+from kemi.memory.model import LifecycleState, MemoryObject, MemorySource, MemoryType
 
 if TYPE_CHECKING:
-    from kemi.encryption import EncryptionConfig
+    from kemi.infra.encryption import EncryptionConfig
 
 
 class JSONStorageAdapter(StorageAdapter):
@@ -25,11 +25,11 @@ class JSONStorageAdapter(StorageAdapter):
     environment variables.
     """
 
-    def __init__(self, path: str = "kemi.json", encryption: "EncryptionConfig | None" = None):
+    def __init__(self, path: str = "kemi.json", encryption: EncryptionConfig | None = None):
         self._path = Path(path)
         self._data = self._load()
         # Lazy import to avoid circular dependency
-        from kemi.encryption import EncryptionConfig, FieldEncryptor
+        from kemi.infra.encryption import EncryptionConfig, FieldEncryptor
 
         if encryption is None:
             try:
@@ -235,9 +235,13 @@ class JSONStorageAdapter(StorageAdapter):
         users = set(m["user_id"] for m in self._data["memories"].values())
         return list(users)
 
-    def upgrade_schema(self, from_version: int, to_version: int) -> None:
-        self._data["schema_version"] = to_version
+    def upgrade_schema(
+        self, from_version: int | None = None, to_version: int | None = None
+    ) -> int:
+        to_v = to_version if to_version is not None else 1
+        self._data["schema_version"] = to_v
         self._save()
+        return to_v
 
     def get_by_tag(
         self,
